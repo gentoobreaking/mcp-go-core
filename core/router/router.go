@@ -28,6 +28,8 @@ type Router struct {
 	promptListChanged    func() error
 	resourceListChanged  func() error
 	toolsListChanged     func() error
+	progressHandler      func(params protocol.ProgressNotificationParams)
+	messageHandler       func(level, logger string, data any)
 }
 
 // SamplingHandler is called when the client sends sampling/createMessage.
@@ -133,6 +135,14 @@ func (r *Router) Dispatch(ctx context.Context, req *protocol.Request) (*protocol
 		return r.dispatchRootsListChanged(ctx, req)
 	case "resources/subscribe":
 		return r.dispatchSubscribe(ctx, req)
+	case "resources/unsubscribe":
+		return r.dispatchUnsubscribe(ctx, req)
+	case "resources/templates/list":
+		return r.dispatchListResourceTemplates(ctx, req)
+	case "notifications/progress":
+		return r.dispatchProgress(ctx, req)
+	case "notifications/message":
+		return r.dispatchMessage(ctx, req)
 	case "prompts/create":
 		return r.dispatchCreatePrompt(ctx, req)
 	case "notifications/prompts/list_changed":
@@ -329,6 +339,81 @@ func (r *Router) dispatchToolsListChanged(ctx context.Context, req *protocol.Req
 		_ = r.toolsListChanged()
 	}
 	return &protocol.Response{JSONRPC: "2.0", ID: req.ID, Result: nil}, nil
+}
+
+// dispatchUnsubscribe handles resources/unsubscribe — removes a subscription.
+func (r *Router) dispatchUnsubscribe(ctx context.Context, req *protocol.Request) (*protocol.Response, error) {
+	var params protocol.UnsubscribeParams
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return nil, mcperror.NewInvalidParamsError("invalid unsubscribe params: " + err.Error())
+	}
+
+	if params.URI == "" {
+		return nil, mcperror.NewInvalidParamsError("uri is required")
+	}
+
+	delete(r.subscriptions, params.URI)
+
+	return &protocol.Response{
+		JSONRPC: "2.0",
+		ID:      req.ID,
+		Result:  map[string]any{"success": true},
+	}, nil
+}
+
+// dispatchListResourceTemplates handles resources/templates/list.
+func (r *Router) dispatchListResourceTemplates(ctx context.Context, req *protocol.Request) (*protocol.Response, error) {
+	var templates []protocol.ResourceTemplate
+	// Return registered resource templates (currently empty — templates
+	// would be registered separately from static resources)
+	return &protocol.Response{
+		JSONRPC: "2.0",
+		ID:      req.ID,
+		Result:  protocol.ResourceTemplateListResult{Templates: templates},
+	}, nil
+}
+
+// dispatchProgress handles notifications/progress client→server (ack).
+func (r *Router) dispatchProgress(ctx context.Context, req *protocol.Request) (*protocol.Response, error) {
+	var params protocol.ProgressNotificationParams
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return nil, mcperror.NewInvalidParamsError("invalid progress params: " + err.Error())
+	}
+
+	if r.progressHandler != nil {
+		r.progressHandler(params)
+	}
+	return &protocol.Response{JSONRPC: "2.0", ID: req.ID, Result: nil}, nil
+}
+
+// dispatchMessage handles notifications/message client→server.
+func (r *Router) dispatchMessage(ctx context.Context, req *protocol.Request) (*protocol.Response, error) {
+	var params protocol.MessageNotificationParams
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return nil, mcperror.NewInvalidParamsError("invalid message params: " + err.Error())
+	}
+
+	if r.messageHandler != nil {
+		r.messageHandler(params.Level, params.Logger, params.Data)
+	}
+	return &protocol.Response{JSONRPC: "2.0", ID: req.ID, Result: nil}, nil
+}
+
+// Unsubscribe removes a resource subscription by URI.
+func (r *Router) Unsubscribe(uri string) {
+	delete(r.subscriptions, uri)
+}
+
+// SetUnsubscribe... not needed; Unsubscribe is direct
+
+// SetProgressHandler registers a callback for notifications/progress.
+func (r *Router) SetProgressHandler(h func(params protocol.ProgressNotificationParams)) {
+	r.progressHandler = h
+}
+
+// SetMessageHandler registers a callback for notifications/message.
+func (r *Router) SetMessageHandler(h func(level, logger string, data any)) {
+	r.messageHandler = h
 }
 
 // SetPromptListChangedHandler registers a callback for notifications/prompts/list_changed.

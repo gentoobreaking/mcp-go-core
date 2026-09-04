@@ -424,3 +424,42 @@ type ResourceUpdateNotification struct {
 
 // NotificationSender sends a notification to connected clients.
 type NotificationSender func(method string, params any) error
+// ResourceTemplateListResult is returned by resources/templates/list.
+type ResourceTemplateListResult struct {
+	Templates []ResourceTemplate `json:"templates,omitempty"`
+}
+
+
+// UnsubscribeParams is sent from client to server via resources/unsubscribe.
+type UnsubscribeParams struct {
+	URI string `json:"uri"`
+}
+
+// ProgressNotification is sent from server to client via notifications/progress.
+type ProgressNotification struct {
+	JSONRPC string                  `json:"jsonrpc"`
+	Method  string                  `json:"method"`
+	Params  ProgressNotificationParams `json:"params"`
+}
+
+// ProgressNotificationParams contains progress update details.
+type ProgressNotificationParams struct {
+	ProgressToken any    `json:"progressToken"`
+	Progress      int    `json:"progress"`
+	Total         *int   `json:"total,omitempty"`
+	Message       string `json:"message,omitempty"`
+}
+
+// MessageNotification is sent from server to client via notifications/message.
+type MessageNotification struct {
+	JSONRPC string                    `json:"jsonrpc"`
+	Method  string                    `json:"method"`
+	Params  MessageNotificationParams `json:"params"`
+}
+
+// MessageNotificationParams contains a server-logged message.
+type MessageNotificationParams struct {
+	Level  string `json:"level"`
+	Logger string `json:"logger,omitempty"`
+	Data   any    `json:"data"`
+}

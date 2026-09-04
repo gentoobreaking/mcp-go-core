@@ -902,3 +902,144 @@ func TestDispatchToolsListChanged(t *testing.T) {
 		t.Fatalf("expected jsonrpc 2.0, got %s", resp.JSONRPC)
 	}
 }
+
+// T101: resources/templates/list
+func TestDispatchListResourceTemplates(t *testing.T) {
+	r := NewRouter()
+
+	req := &protocol.Request{
+		JSONRPC: "2.0",
+		ID:      int64Ptr(1),
+		Method:  "resources/templates/list",
+	}
+
+	resp, err := r.Dispatch(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Dispatch error: %v", err)
+	}
+
+	result, ok := resp.Result.(protocol.ResourceTemplateListResult)
+	if !ok {
+		t.Fatalf("expected ResourceTemplateListResult, got %T", resp.Result)
+	}
+	if result.Templates != nil && len(result.Templates) > 0 {
+		t.Fatalf("expected empty templates list, got %d", len(result.Templates))
+	}
+}
+
+// T101: resources/unsubscribe
+func TestDispatchUnsubscribe(t *testing.T) {
+	r := NewRouter()
+
+	// Subscribe first
+	r.subscriptions["mcp://test/1"] = true
+
+	params := json.RawMessage(`{"uri":"mcp://test/1"}`)
+	req := &protocol.Request{
+		JSONRPC: "2.0",
+		ID:      int64Ptr(1),
+		Method:  "resources/unsubscribe",
+		Params:  params,
+	}
+
+	resp, err := r.Dispatch(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Dispatch error: %v", err)
+	}
+
+	if resp.JSONRPC != "2.0" {
+		t.Fatalf("expected jsonrpc 2.0, got %s", resp.JSONRPC)
+	}
+
+	if r.IsSubscribed("mcp://test/1") {
+		t.Fatal("expected subscription to be removed")
+	}
+}
+
+// T101: resources/unsubscribe with missing URI
+func TestDispatchUnsubscribeMissingURI(t *testing.T) {
+	r := NewRouter()
+
+	req := &protocol.Request{
+		JSONRPC: "2.0",
+		ID:      int64Ptr(1),
+		Method:  "resources/unsubscribe",
+		Params:  json.RawMessage(`{}`),
+	}
+
+	_, err := r.Dispatch(context.Background(), req)
+	if err == nil {
+		t.Fatal("expected error for missing uri")
+	}
+}
+
+// T101: notifications/progress
+func TestDispatchProgress(t *testing.T) {
+	r := NewRouter()
+
+	var received protocol.ProgressNotificationParams
+	r.SetProgressHandler(func(params protocol.ProgressNotificationParams) {
+		received = params
+	})
+
+	params := json.RawMessage(`{"progressToken":"abc-123","progress":5,"message":"working"}`)
+	req := &protocol.Request{
+		JSONRPC: "2.0",
+		ID:      int64Ptr(1),
+		Method:  "notifications/progress",
+		Params:  params,
+	}
+
+	resp, err := r.Dispatch(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Dispatch error: %v", err)
+	}
+
+	if resp.JSONRPC != "2.0" {
+		t.Fatalf("expected jsonrpc 2.0, got %s", resp.JSONRPC)
+	}
+
+	if received.Progress != 5 {
+		t.Fatalf("expected progress 5, got %d", received.Progress)
+	}
+	if received.Message != "working" {
+		t.Fatalf("expected message 'working', got %s", received.Message)
+	}
+}
+
+// T101: notifications/message
+func TestDispatchMessage(t *testing.T) {
+	r := NewRouter()
+
+	var receivedLevel string
+	var receivedData any
+	r.SetMessageHandler(func(level, logger string, data any) {
+		receivedLevel = level
+		
+		receivedData = data
+	})
+
+	params := json.RawMessage(`{"level":"info","logger":"myLogger","data":"hello"}`)
+	req := &protocol.Request{
+		JSONRPC: "2.0",
+		ID:      int64Ptr(1),
+		Method:  "notifications/message",
+		Params:  params,
+	}
+
+	resp, err := r.Dispatch(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Dispatch error: %v", err)
+	}
+
+	if resp.JSONRPC != "2.0" {
+		t.Fatalf("expected jsonrpc 2.0, got %s", resp.JSONRPC)
+	}
+
+	if receivedLevel != "info" {
+		t.Fatalf("expected level info, got %s", receivedLevel)
+	}
+	if receivedData != "hello" {
+		t.Fatalf("expected data 'hello', got %v", receivedData)
+	}
+}
