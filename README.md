@@ -1,6 +1,7 @@
 # mcp-go-core
 
-A minimal MCP (Model Context Protocol) server framework for Go.
+A minimal High-performance, low-resource, modular MCP (Model Context Protocol) server framework for Go.
+
 
 ## Overview
 
