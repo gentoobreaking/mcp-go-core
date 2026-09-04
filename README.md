@@ -593,7 +593,7 @@ go test -bench=. -benchmem ./benchmarks/...
 
 ### Test Counts
 
-- **333 total tests, 0 failures**
+- **353 total tests, 0 failures**
 
 | Type | Description |
 |---|---|
