@@ -603,7 +603,7 @@ HTTP + 監控 + 追蹤：
 mcp-go-core run --transport http --addr 0.0.0.0:8080 --metrics --tracing
 ```
 
-[NEEDS VERIFICATION: 完整的容器化/Kubernetes 部署文件待執行期部署工具完備後提供。]
+[NEEDS VERIFICATION: 容器化部署工具鏈（Dockerfile、docker-compose.yml、CI 映像建置/推送）尚未實作。K8s 清單生成功能可透過 `mcp-go-core k8s` 使用，但缺少容器映像建置、登錄推送及部署自動化。待執行期部署工具完備後提供完整文件。]
 
 ---
 

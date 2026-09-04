@@ -606,7 +606,7 @@ HTTP + Metrics + Tracing:
 mcp-go-core run --transport http --addr 0.0.0.0:8080 --metrics --tracing
 ```
 
-[NEEDS VERIFICATION: Full deployment documentation for containerized/Kubernetes deployment will be provided when runtime deployment tooling is complete.]
+[NEEDS VERIFICATION: Containerized deployment toolchain (Dockerfile, docker-compose.yml, CI image build/push) is not yet implemented. K8s manifest generation is available via `mcp-go-core k8s`, but no container image building, registry push, or deployment automation exists. Documentation will be provided when runtime deployment tooling is complete.]
 
 ---
 
