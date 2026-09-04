@@ -102,10 +102,12 @@ func (t *Transport) Serve(ctx context.Context, handler Handler) error {
 		respondJSON(w, result)
 	})
 
+	t.mu.Lock()
 	t.httpSrv = &http.Server{
 		Addr:    t.addr,
 		Handler: mux,
 	}
+	t.mu.Unlock()
 
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -127,10 +129,13 @@ func (t *Transport) Serve(ctx context.Context, handler Handler) error {
 // Close gracefully shuts down the SSE transport.
 func (t *Transport) Close(ctx context.Context) error {
 	t.smu.CloseAll()
-	if t.httpSrv == nil {
+	t.mu.RLock()
+	srv := t.httpSrv
+	t.mu.RUnlock()
+	if srv == nil {
 		return nil
 	}
-	return t.httpSrv.Shutdown(ctx)
+	return srv.Shutdown(ctx)
 }
 
 func readBody(r *http.Request) (json.RawMessage, error) {
