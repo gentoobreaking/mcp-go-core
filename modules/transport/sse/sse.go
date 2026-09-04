@@ -21,19 +21,27 @@ type Handler = transport.Handler
 // Transport implements MCP over SSE with session management,
 // using mark3labs/mcp-go/server.SSEServer as the underlying backend.
 type Transport struct {
-	addr      string
-	sseServer *server.SSEServer
-	smu       *transport.SessionManager
-	mu        sync.RWMutex
-	httpSrv   *http.Server
+	addr        string
+	sseServer   *server.SSEServer
+	smu         *transport.SessionManager
+	mu          sync.RWMutex
+	httpSrv     *http.Server
+	healthRoutes http.Handler
 }
-
 // New creates a new SSE transport backed by mark3labs/mcp-go.
 func New(addr string) *Transport {
 	return &Transport{
 		addr: addr,
 		smu:  transport.NewSessionManager(),
 	}
+}
+
+// WithHealthRoutes enables health check endpoints on this transport.
+func (t *Transport) WithHealthRoutes(h http.Handler) *Transport {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.healthRoutes = h
+	return t
 }
 
 // ConfigureWith configures the SSE server with a custom handler.
@@ -101,6 +109,18 @@ func (t *Transport) Serve(ctx context.Context, handler Handler) error {
 
 		respondJSON(w, result)
 	})
+
+	// Mount health routes if configured
+	t.mu.RLock()
+	healthRoutes := t.healthRoutes
+	t.mu.RUnlock()
+	if healthRoutes != nil {
+		mux.Handle("/health", healthRoutes)
+		mux.Handle("/health/features", healthRoutes)
+		mux.Handle("/health/features/", healthRoutes)
+		mux.Handle("/health/rate-limits", healthRoutes)
+		mux.Handle("/health/config", healthRoutes)
+	}
 
 	t.mu.Lock()
 	t.httpSrv = &http.Server{

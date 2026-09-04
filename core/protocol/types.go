@@ -421,6 +421,18 @@ type ResourceUpdateNotification struct {
 	Method  string              `json:"method"`
 	Params  ResourceUpdateParams `json:"params"`
 }
+// ResourceDeletedNotification is a server→client notification emitted when a
+// subscribed resource is deleted/removed.
+type ResourceDeletedNotification struct {
+	JSONRPC string             `json:"jsonrpc"`
+	Method  string             `json:"method"`
+	Params  ResourceDeleteParams `json:"params"`
+}
+
+// ResourceDeleteParams contains the URI of the deleted resource.
+type ResourceDeleteParams struct {
+	URI string `json:"uri"`
+}
 
 // NotificationSender sends a notification to connected clients.
 type NotificationSender func(method string, params any) error

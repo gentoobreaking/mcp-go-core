@@ -932,7 +932,7 @@ func TestDispatchUnsubscribe(t *testing.T) {
 	r := NewRouter()
 
 	// Subscribe first
-	r.subscriptions["mcp://test/1"] = true
+	r.subscriptions["mcp://test/1"] = map[string]bool{"default": true}
 
 	params := json.RawMessage(`{"uri":"mcp://test/1"}`)
 	req := &protocol.Request{
@@ -1290,5 +1290,85 @@ func TestDispatchSubscriptionListen(t *testing.T) {
 	}
 	if result["success"] != true {
 		t.Fatal("expected success true")
+	}
+}
+// T104: DeleteResource emits notifications/resources/deleted to subscribers
+func TestDeleteResourceNotifiesSubscriber(t *testing.T) {
+	r := NewRouter()
+	r.SetNotificationSender(func(method string, params any) error {
+		if method != "notifications/resources/deleted" {
+			t.Errorf("expected notifications/resources/deleted, got %s", method)
+		}
+		p, ok := params.(protocol.ResourceDeleteParams)
+		if !ok {
+			t.Fatalf("expected ResourceDeleteParams, got %T", params)
+		}
+		if p.URI != "mcp://test/1" {
+			t.Errorf("expected URI mcp://test/1, got %s", p.URI)
+		}
+		return nil
+	})
+
+	// Subscribe first
+	r.Subscribe("mcp://test/1", "client-1")
+
+	// Delete the resource
+	err := r.DeleteResource("mcp://test/1")
+	if err != nil {
+		t.Fatalf("DeleteResource error: %v", err)
+	}
+
+	if r.IsSubscribed("mcp://test/1") {
+		t.Fatal("expected subscription to be removed after delete")
+	}
+}
+
+// T104: Per-client subscription tracking — only the unsubscribed client is removed
+func TestPerClientSubscribeUnsubscribe(t *testing.T) {
+	r := NewRouter()
+
+	// Subscribe two clients
+	r.Subscribe("mcp://test/1", "client-1")
+	r.Subscribe("mcp://test/1", "client-2")
+
+	if !r.IsSubscribed("mcp://test/1") {
+		t.Fatal("expected resource to be subscribed")
+	}
+
+	// Unsubscribe only client-1
+	r.UnsubscribeClient("mcp://test/1", "client-1")
+
+	// Resource should still be subscribed because client-2 is still subscribed
+	if !r.IsSubscribed("mcp://test/1") {
+		t.Fatal("expected resource to still be subscribed after removing one client")
+	}
+
+	// Unsubscribe client-2 as well
+	r.UnsubscribeClient("mcp://test/1", "client-2")
+
+	if r.IsSubscribed("mcp://test/1") {
+		t.Fatal("expected subscription to be fully removed")
+	}
+}
+
+// T104: IsSubscribed backwards compatibility — works as before with default client
+func TestIsSubscribedBackwardsCompat(t *testing.T) {
+	r := NewRouter()
+
+	// Subscribe with default client (backward-compatible API)
+	r.subscriptions["mcp://test/1"] = map[string]bool{"default": true}
+
+	if !r.IsSubscribed("mcp://test/1") {
+		t.Fatal("expected IsSubscribed to return true for default client subscription")
+	}
+
+	if r.IsSubscribed("mcp://test/nonexistent") {
+		t.Fatal("expected IsSubscribed to return false for nonexistent URI")
+	}
+
+	// Unsubscribe all clients (backward-compatible API)
+	r.Unsubscribe("mcp://test/1")
+	if r.IsSubscribed("mcp://test/1") {
+		t.Fatal("expected IsSubscribed to return false after Unsubscribe")
 	}
 }

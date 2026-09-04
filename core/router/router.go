@@ -21,10 +21,10 @@ type Router struct {
 	logLevel  protocol.LogLevel
 	sampler   SamplingHandler
 	onResourceCreated CreatedNotifier
-	subscriptions map[string]bool
-	rootsHandler    func() error
-	notifyHandler   protocol.NotificationSender
-	promptCreator   PromptCreator
+	subscriptions  map[string]map[string]bool
+	rootsHandler     func() error
+	notifyHandler    protocol.NotificationSender
+	promptCreator    PromptCreator
 	promptListChanged    func() error
 	resourceListChanged  func() error
 	toolsListChanged     func() error
@@ -52,7 +52,7 @@ func NewRouter() *Router {
 		resources: make(map[string]resource.Resource),
 		prompts:   make(map[string]prompt.Prompt),
 		logLevel:  protocol.LogLevelInfo,
-		subscriptions: make(map[string]bool),
+		subscriptions: make(map[string]map[string]bool),
 		elicitationRegistry: make(map[string]protocol.ElicitationResult),
 		taskRegistry: make(map[string]protocol.TaskResult),
 	}
@@ -261,7 +261,12 @@ func (r *Router) dispatchSubscribe(ctx context.Context, req *protocol.Request) (
 		return nil, mcperror.NewInvalidParamsError("uri is required")
 	}
 
-	r.subscriptions[params.URI] = true
+	// Track subscription per-client (default client = "default" when no session ID context)
+	clientID := clientIDFromContext(ctx)
+	if r.subscriptions[params.URI] == nil {
+		r.subscriptions[params.URI] = make(map[string]bool)
+	}
+	r.subscriptions[params.URI][clientID] = true
 
 	return &protocol.Response{
 		JSONRPC: "2.0",
@@ -278,7 +283,11 @@ func (r *Router) SetRootsHandler(handler func() error) {
 
 // IsSubscribed returns whether a resource URI has an active subscription.
 func (r *Router) IsSubscribed(uri string) bool {
-	return r.subscriptions[uri]
+	clients, ok := r.subscriptions[uri]
+	if !ok {
+		return false
+	}
+	return len(clients) > 0
 }
 
 // SetNotificationSender registers a callback for emitting server→client
@@ -291,22 +300,20 @@ func (r *Router) SetNotificationSender(handler protocol.NotificationSender) {
 // to all clients subscribed to the given URI.
 // changeType is "update" or "delete".
 func (r *Router) NotifyResourceUpdate(uri, changeType string) error {
-	for sub := range r.subscriptions {
-		if sub == uri {
-			notify := protocol.ResourceUpdateNotification{
-				JSONRPC: "2.0",
-				Method:  "notifications/resources/update",
-				Params: protocol.ResourceUpdateParams{
-					URI:        uri,
-					ChangeType: changeType,
-				},
-			}
-			if r.notifyHandler != nil {
-				if err := r.notifyHandler(notify.Method, notify.Params); err != nil {
-					return err
-				}
-			}
-		}
+	clients, ok := r.subscriptions[uri]
+	if !ok || len(clients) == 0 {
+		return nil // no subscribers
+	}
+	notify := protocol.ResourceUpdateNotification{
+		JSONRPC: "2.0",
+		Method:  "notifications/resources/update",
+		Params: protocol.ResourceUpdateParams{
+			URI:        uri,
+			ChangeType: changeType,
+		},
+	}
+	if r.notifyHandler != nil {
+		return r.notifyHandler(notify.Method, notify.Params)
 	}
 	return nil
 }
@@ -374,7 +381,14 @@ func (r *Router) dispatchUnsubscribe(ctx context.Context, req *protocol.Request)
 		return nil, mcperror.NewInvalidParamsError("uri is required")
 	}
 
-	delete(r.subscriptions, params.URI)
+	// Remove per-client subscription
+	clientID := clientIDFromContext(ctx)
+	if clients, ok := r.subscriptions[params.URI]; ok {
+		delete(clients, clientID)
+		if len(clients) == 0 {
+			delete(r.subscriptions, params.URI)
+		}
+	}
 
 	return &protocol.Response{
 		JSONRPC: "2.0",
@@ -421,12 +435,72 @@ func (r *Router) dispatchMessage(ctx context.Context, req *protocol.Request) (*p
 	return &protocol.Response{JSONRPC: "2.0", ID: req.ID, Result: nil}, nil
 }
 
-// Unsubscribe removes a resource subscription by URI.
+// Unsubscribe removes a resource subscription by URI for all clients.
 func (r *Router) Unsubscribe(uri string) {
 	delete(r.subscriptions, uri)
 }
 
-// SetUnsubscribe... not needed; Unsubscribe is direct
+// DeleteResource removes a registered resource and emits a
+// notifications/resources/deleted notification to any subscribed clients.
+func (r *Router) DeleteResource(uri string) error {
+	delete(r.resources, uri)
+	// Notify subscribers first, then clear subscriptions
+	err := r.NotifyResourceDeleted(uri)
+	delete(r.subscriptions, uri)
+	return err
+}
+
+// NotifyResourceDeleted emits a notifications/resources/deleted notification
+// to all clients subscribed to the given URI.
+func (r *Router) NotifyResourceDeleted(uri string) error {
+	notify := protocol.ResourceDeletedNotification{
+		JSONRPC: "2.0",
+		Method:  "notifications/resources/deleted",
+		Params: protocol.ResourceDeleteParams{
+			URI: uri,
+		},
+	}
+	if r.notifyHandler != nil {
+		return r.notifyHandler(notify.Method, notify.Params)
+	}
+	return nil
+}
+
+// Subscribe registers a subscription for a URI for a given client ID.
+// If clientID is empty, "default" is used.
+func (r *Router) Subscribe(uri, clientID string) {
+	if clientID == "" {
+		clientID = "default"
+	}
+	if r.subscriptions[uri] == nil {
+		r.subscriptions[uri] = make(map[string]bool)
+	}
+	r.subscriptions[uri][clientID] = true
+}
+
+// UnsubscribeClient removes a subscription for a specific client ID.
+func (r *Router) UnsubscribeClient(uri, clientID string) {
+	if clients, ok := r.subscriptions[uri]; ok {
+		delete(clients, clientID)
+		if len(clients) == 0 {
+			delete(r.subscriptions, uri)
+		}
+	}
+}
+
+// ClientIDKey is the context key for the client/session ID.
+type ClientIDKey struct{}
+
+// clientIDFromContext extracts a client ID from context, defaulting to "default".
+func clientIDFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return "default"
+	}
+	if id, ok := ctx.Value(ClientIDKey{}).(string); ok && id != "" {
+		return id
+	}
+	return "default"
+}
 
 // SetProgressHandler registers a callback for notifications/progress.
 func (r *Router) SetProgressHandler(h func(params protocol.ProgressNotificationParams)) {
