@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 
 	"github.com/project/mcp-go-core/modules/transport"
@@ -16,10 +17,15 @@ type Handler = transport.Handler
 
 // Transport implements MCP over Streamable HTTP.
 type Transport struct {
-	server *http.Server
-	mu     sync.Mutex
+	server       *http.Server
+	healthRoutes http.Handler // optional; set via WithHealthRoutes
+	mu           sync.Mutex
 }
-
+// WithHealthRoutes enables health check endpoints on this transport.
+func (t *Transport) WithHealthRoutes(h http.Handler) *Transport {
+	t.healthRoutes = h
+	return t
+}
 // New creates a new HTTP transport.
 func New(addr string) *Transport {
 	return &Transport{
@@ -41,8 +47,18 @@ func (t *Transport) Serve(ctx context.Context, handler Handler) error {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
 	})
-	t.server.Handler = mux
-
+	// Mount health routes if configured — health mux takes priority, falls through to main mux
+	var rootHandler http.Handler = mux
+	if t.healthRoutes != nil {
+		rootHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasPrefix(r.URL.Path, "/health") {
+				t.healthRoutes.ServeHTTP(w, r)
+				return
+			}
+			mux.ServeHTTP(w, r)
+		})
+	}
+	t.server.Handler = rootHandler
 	errCh := make(chan error, 1)
 	go func() {
 		if err := t.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {

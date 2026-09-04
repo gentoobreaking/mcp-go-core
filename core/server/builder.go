@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/project/mcp-go-core/core/config"
 	"github.com/project/mcp-go-core/core/feature"
 	"github.com/project/mcp-go-core/core/middleware"
 	"github.com/project/mcp-go-core/core/middleware/ratelimit"
@@ -26,17 +27,20 @@ type Handler = middleware.Handler
 // Builder provides a fluent API for constructing a Server.
 // Lifecycle order is enforced: WithName → WithTool/WithResource/WithPrompt → WithTransport → Build.
 type Builder struct {
-	mu        sync.Mutex
-	name      string
-	timeout   time.Duration
-	tools     []tool.Tool
-	resources []resource.Resource
-	prompts   []prompt.Prompt
-	flags     *feature.Flags
-	lim       *ratelimit.Manager
-	transport Transport
-	mw        []Middleware
-	built     bool
+	mu          sync.Mutex
+	name        string
+	version     string
+	timeout     time.Duration
+	tools       []tool.Tool
+	resources   []resource.Resource
+	prompts     []prompt.Prompt
+	flags       *feature.Flags
+	lim         *ratelimit.Manager
+	transport   Transport
+	mw          []Middleware
+	health      bool
+	cfg         *config.Config
+	built       bool
 }
 
 // NewBuilder creates a new Server Builder.
@@ -117,6 +121,23 @@ func (b *Builder) WithMiddleware(mw ...Middleware) *Builder {
 	b.mw = append(b.mw, mw...)
 	return b
 }
+// WithHealth enables HTTP health check endpoints on the transport.
+func (b *Builder) WithHealth(enabled bool) *Builder {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.health = enabled
+	return b
+}
+
+// WithConfig attaches configuration for health endpoint reporting.
+func (b *Builder) WithConfig(c *config.Config) *Builder {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.cfg = c
+	return b
+}
+
+// Build constructs the Server with all configured options.
 
 // Build constructs the Server with all configured options.
 // Returns an error if no transport is set.
@@ -129,14 +150,16 @@ func (b *Builder) Build() (*Server, error) {
 	}
 
 	s := &Server{
-		name:       b.name,
-		router:     router.NewRouter(),
-		shutdownCh: make(chan struct{}),
-		timeout:    b.timeout,
-		flags:      b.flags,
-		lim:        b.lim,
-		transport:  b.transport,
-		mw:         b.mw,
+		name:          b.name,
+		router:        router.NewRouter(),
+		shutdownCh:    make(chan struct{}),
+		timeout:       b.timeout,
+		flags:         b.flags,
+		lim:           b.lim,
+		transport:     b.transport,
+		mw:            b.mw,
+		healthEnabled: b.health,
+		cfg:           b.cfg,
 	}
 
 	for _, t := range b.tools {

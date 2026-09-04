@@ -5,11 +5,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"sync"
 	"time"
 
+	"github.com/project/mcp-go-core/core/config"
 	"github.com/project/mcp-go-core/core/feature"
 	"github.com/project/mcp-go-core/core/mcperror"
+	"github.com/project/mcp-go-core/core/middleware/featurewire"
 	"github.com/project/mcp-go-core/core/middleware/ratelimit"
 	"github.com/project/mcp-go-core/core/prompt"
 	"github.com/project/mcp-go-core/core/protocol"
@@ -33,6 +36,8 @@ type Server struct {
 	timeout     time.Duration
 	initialized bool
 	running     bool
+	healthEnabled bool
+	cfg           *config.Config
 }
 
 // Option configures a Server.
@@ -56,6 +61,99 @@ func WithFlags(f *feature.Flags) Option {
 // WithRateLimiter sets a rate limiter manager for the server.
 func WithRateLimiter(lim *ratelimit.Manager) Option {
 	return func(s *Server) { s.lim = lim }
+}
+
+// WithHealth enables HTTP health check endpoints on the transport.
+func WithHealth(enabled bool) Option {
+	return func(s *Server) { s.healthEnabled = enabled }
+}
+// WithConfig attaches configuration for health endpoint reporting.
+func WithConfig(c *config.Config) Option {
+	return func(s *Server) { s.cfg = c }
+}
+
+// HealthHandler returns HTTP handlers for health check endpoints.
+// Only returns non-nil handlers when WithHealth(true) was called.
+func (s *Server) HealthHandler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/health", s.handleHealth)
+	mux.HandleFunc("/health/features", s.handleHealthFeatures)
+	mux.HandleFunc("/health/features/", s.handleHealthFeature)
+	mux.HandleFunc("/health/rate-limits", s.handleHealthRateLimits)
+	mux.HandleFunc("/health/config", s.handleHealthConfig)
+	return mux
+}
+
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":  "ok",
+		"version": s.version,
+	})
+}
+
+func (s *Server) handleHealthFeatures(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if s.flags == nil {
+		http.Error(w, "flags not configured", http.StatusServiceUnavailable)
+		return
+	}
+	status := featurewire.HealthStatus(s.flags)
+	json.NewEncoder(w).Encode(map[string]any{"flags": status})
+}
+
+func (s *Server) handleHealthFeature(w http.ResponseWriter, r *http.Request) {
+	name := r.URL.Path[len("/health/features/"):]
+	if name == "" {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if s.flags == nil {
+		http.Error(w, "flags not configured", http.StatusServiceUnavailable)
+		return
+	}
+	flag := s.flags.Get(name)
+	snap := s.flags.Snapshot()
+	if _, ok := snap[name]; !ok {
+		http.Error(w, "flag not found: " + name, http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]any{
+		"name":    name,
+		"enabled": flag.Enabled,
+	})
+}
+
+func (s *Server) handleHealthRateLimits(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if s.lim == nil {
+		http.Error(w, "rate limiter not configured", http.StatusServiceUnavailable)
+		return
+	}
+	statuses := s.lim.Status()
+	// Convert to JSON-serializable form
+	out := make([]map[string]any, 0, len(statuses))
+	for _, st := range statuses {
+		out = append(out, map[string]any{
+			"method":    st.Name,
+			"limit":     st.Limit,
+			"burst":     st.Burst,
+			"requests":  st.Requests,
+		})
+	}
+	json.NewEncoder(w).Encode(map[string]any{"limits": out})
+}
+
+func (s *Server) handleHealthConfig(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if s.cfg == nil {
+		http.Error(w, "config not configured", http.StatusServiceUnavailable)
+		return
+	}
+	json.NewEncoder(w).Encode(s.cfg.Health())
 }
 
 // WithShutdownTimeout sets the shutdown timeout.
@@ -210,6 +308,15 @@ func (s *Server) Run(ctx context.Context) error {
 	// Wire notification sender to router — sends server→client notifications
 	s.router.SetNotificationSender(s.sendNotification)
 
+	// Wire health routes if enabled and transport supports it
+	if s.healthEnabled {
+		type healthSetter interface {
+			WithHealthRoutes(http.Handler)
+		}
+		if hs, ok := s.transport.(healthSetter); ok {
+			hs.WithHealthRoutes(s.HealthHandler())
+		}
+	}
 	// Create the message handler that routes through the router
 	handler := transport.Handler(s.handleMessage)
 
