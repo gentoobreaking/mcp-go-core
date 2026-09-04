@@ -11,10 +11,12 @@ import (
 	"os/signal"
 	"sync"
 	"syscall"
+
+	"github.com/project/mcp-go-core/modules/transport"
 )
 
 // Handler processes a JSON-RPC message.
-type Handler func(ctx context.Context, msg json.RawMessage) (any, error)
+type Handler = transport.Handler
 
 // Transport implements MCP over stdio.
 type Transport struct {
@@ -123,4 +125,9 @@ func (t *Transport) Send(msg any) error {
 	}
 	_, err = fmt.Fprintln(t.out, string(data))
 	return err
+}
+
+// Close shuts down the stdio transport.
+func (t *Transport) Close(ctx context.Context) error {
+	return nil
 }

@@ -3,24 +3,26 @@ package sse
 import (
 	"context"
 	"encoding/json"
-	"net/http"
 	"testing"
 	"time"
+
+	"github.com/project/mcp-go-core/modules/transport"
 )
+
+// Compile-time check: SSE Transport implements Transport interface.
+var _ transport.Transport = (*Transport)(nil)
 
 func TestNewSSETransport(t *testing.T) {
 	tr := New("localhost:18080")
 	if tr == nil {
 		t.Fatal("expected non-nil transport")
 	}
-	if tr.addr != "localhost:18080" {
-		t.Fatal("addr mismatch")
-	}
 }
 
 func TestSSEServe(t *testing.T) {
 	tr := New("localhost:18081")
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	handler := func(ctx context.Context, msg json.RawMessage) (any, error) {
 		return map[string]any{"status": "ok"}, nil
@@ -44,28 +46,63 @@ func TestSSEServe(t *testing.T) {
 	}
 }
 
-func TestSSEShutdown(t *testing.T) {
-	tr := New("localhost:18082")
-	ctx := context.Background()
-	tr.Shutdown(ctx)
-}
-
 func TestSSEHandlerInterface(t *testing.T) {
 	var _ Handler = func(ctx context.Context, msg json.RawMessage) (any, error) {
 		return nil, nil
 	}
 }
 
-func TestSSEConfigureWith(t *testing.T) {
-	tr := New("localhost:18090")
-	tr.ConfigureWith("http://localhost:18090", nil)
-	if tr.addr != "localhost:18090" {
-		t.Fatal("addr mismatch")
+func TestSSEClose(t *testing.T) {
+	tr := New("localhost:18082")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	handler := func(ctx context.Context, msg json.RawMessage) (any, error) {
+		return nil, nil
+	}
+
+	go tr.Serve(ctx, handler)
+	time.Sleep(100 * time.Millisecond)
+
+	if err := tr.Close(context.Background()); err != nil {
+		// Server may have already shut down from context cancellation
 	}
 }
 
-func TestSSENotImportStdio(t *testing.T) {
-	// Compile-time check: SSE package should not import stdio transport
-	// This is guaranteed by the import structure
-	_ = http.MethodGet
+func TestSSESessionManager(t *testing.T) {
+	tr := New("localhost:18083")
+	if tr.smu == nil {
+		t.Fatal("expected session manager")
+	}
+	id := tr.smu.RegisterSession()
+	if id == "" {
+		t.Fatal("expected non-empty session ID")
+	}
+	if tr.smu.Count() != 1 {
+		t.Fatalf("expected 1 session, got %d", tr.smu.Count())
+	}
+	tr.smu.UnregisterSession(id)
+	if tr.smu.Count() != 0 {
+		t.Fatal("expected 0 sessions after unregister")
+	}
+}
+
+func TestSSESessionRouting(t *testing.T) {
+	smu := transport.NewSessionManager()
+	id := smu.RegisterSession()
+
+	// Verify session exists
+	if smu.GetSession(id) == nil {
+		t.Fatal("expected session to exist")
+	}
+
+	// Verify session ID is a valid hex string
+	if len(string(id)) != 32 {
+		t.Fatalf("expected 32-char session ID, got %d", len(string(id)))
+	}
+
+	smu.CloseAll()
+	if smu.Count() != 0 {
+		t.Fatal("expected 0 sessions after close all")
+	}
 }

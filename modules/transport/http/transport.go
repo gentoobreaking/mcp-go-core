@@ -7,10 +7,12 @@ import (
 	"io"
 	"net/http"
 	"sync"
+
+	"github.com/project/mcp-go-core/modules/transport"
 )
 
 // Handler processes a JSON-RPC message.
-type Handler func(ctx context.Context, msg json.RawMessage) (any, error)
+type Handler = transport.Handler
 
 // Transport implements MCP over Streamable HTTP.
 type Transport struct {
@@ -86,4 +88,9 @@ func (t *Transport) handleStream(w http.ResponseWriter, r *http.Request, handler
 	if flusher != nil {
 		flusher.Flush()
 	}
+}
+
+// Close shuts down the HTTP transport.
+func (t *Transport) Close(ctx context.Context) error {
+	return t.server.Shutdown(ctx)
 }
