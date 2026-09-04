@@ -1,0 +1,82 @@
+{
+  "total": 19,
+  "passed": 19,
+  "tests": [
+    {
+      "test": "TestGraphAddFeature",
+      "status": "PASS"
+    },
+    {
+      "test": "TestDuplicateFeature",
+      "status": "PASS"
+    },
+    {
+      "test": "TestMissingDependency",
+      "status": "PASS"
+    },
+    {
+      "test": "TestCycleDetection",
+      "status": "PASS"
+    },
+    {
+      "test": "TestSelfDependency",
+      "status": "PASS"
+    },
+    {
+      "test": "TestConflictDetection",
+      "status": "PASS"
+    },
+    {
+      "test": "TestBasicResolution",
+      "status": "PASS"
+    },
+    {
+      "test": "TestTransitiveDependency",
+      "status": "PASS"
+    },
+    {
+      "test": "TestExplicitDisableHardDep",
+      "status": "PASS"
+    },
+    {
+      "test": "TestOptionalDisableNoError",
+      "status": "PASS"
+    },
+    {
+      "test": "TestDeterministicResolution",
+      "status": "PASS"
+    },
+    {
+      "test": "TestProfileResolution",
+      "status": "PASS"
+    },
+    {
+      "test": "TestDependencyClosure",
+      "status": "PASS"
+    },
+    {
+      "test": "TestGraphCount",
+      "status": "PASS"
+    },
+    {
+      "test": "TestListFeaturesSorted",
+      "status": "PASS"
+    },
+    {
+      "test": "TestLockFileDeterministic",
+      "status": "PASS"
+    },
+    {
+      "test": "TestComputeLockHash",
+      "status": "PASS"
+    },
+    {
+      "test": "TestLockFileWrite",
+      "status": "PASS"
+    },
+    {
+      "test": "TestValidateRequiredDependencies",
+      "status": "PASS"
+    }
+  ]
+}

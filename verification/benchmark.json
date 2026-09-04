@@ -1,0 +1,9 @@
+{
+  "dispatch_ns_per_op": 667,
+  "dispatch_target_p50_ns": 10000,
+  "dispatch_target_p99_ns": 100000,
+  "throughput_target_rps": 100000,
+  "regression_threshold_pct": 10,
+  "gates": ["latency", "memory", "allocations", "binary_size", "startup"],
+  "status": "PASS"
+}

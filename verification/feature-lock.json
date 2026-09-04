@@ -1,0 +1,17 @@
+{
+  "framework_version": "v0.1.0",
+  "profile": "default",
+  "features": ["core", "stdio", "http", "jwt", "api_key", "oauth", "sse", "metrics", "tracing", "kubernetes"],
+  "modules": [
+    "modules/transport/stdio",
+    "modules/transport/http",
+    "modules/transport/sse",
+    "modules/security/api_key",
+    "modules/security/jwt",
+    "modules/security/oauth",
+    "modules/middleware/metrics",
+    "modules/middleware/tracing",
+    "modules/storage/memory"
+  ],
+  "status": "complete"
+}

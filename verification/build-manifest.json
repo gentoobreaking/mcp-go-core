@@ -1,0 +1,21 @@
+{
+  "project": "mcp-go-core",
+  "version": "v0.1.0",
+  "profile": "default",
+  "build_stages": {
+    "config": "PASS",
+    "analyze": "PASS",
+    "resolve": "PASS",
+    "lock": "PASS",
+    "generate": "PASS",
+    "compile": "PASS",
+    "verify": "PASS"
+  },
+  "binary_path": "dist/mcp-go-core",
+  "artifacts": [
+    "dist/server",
+    "dist/build-manifest.json",
+    "dist/features.lock",
+    "dist/checksums.txt"
+  ]
+}

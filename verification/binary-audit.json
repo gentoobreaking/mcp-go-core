@@ -1,0 +1,1 @@
+{"binary_size_bytes": 20336514, "profile": "default", "checks": {"core_isolation": "PASS", "transport_isolation": "PASS", "no_umbrella_packages": "PASS", "unexpected_modules": []}
