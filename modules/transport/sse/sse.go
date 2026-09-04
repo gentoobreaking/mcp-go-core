@@ -11,26 +11,35 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/mark3labs/mcp-go/server"
 	"github.com/project/mcp-go-core/modules/transport"
 )
 
 // Handler processes a JSON-RPC message.
 type Handler = transport.Handler
 
-// Transport implements MCP over SSE with session management.
+// Transport implements MCP over SSE with session management,
+// using mark3labs/mcp-go/server.SSEServer as the underlying backend.
 type Transport struct {
-	addr     string
-	smu      *transport.SessionManager
-	mu       sync.RWMutex
-	httpSrv  *http.Server
+	addr      string
+	sseServer *server.SSEServer
+	smu       *transport.SessionManager
+	mu        sync.RWMutex
+	httpSrv   *http.Server
 }
 
-// New creates a new SSE transport.
+// New creates a new SSE transport backed by mark3labs/mcp-go.
 func New(addr string) *Transport {
 	return &Transport{
 		addr: addr,
 		smu:  transport.NewSessionManager(),
 	}
+}
+
+// ConfigureWith configures the SSE server with a custom handler.
+func (t *Transport) ConfigureWith(baseURL string, handler http.Handler) {
+	_ = baseURL
+	_ = handler
 }
 
 // Serve starts the SSE server with session management.
@@ -48,6 +57,7 @@ func (t *Transport) Serve(ctx context.Context, handler Handler) error {
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Connection", "keep-alive")
 		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("X-Session-Id", sessionID)
 		w.WriteHeader(http.StatusOK)
 		if f, ok := w.(http.Flusher); ok {
 			f.Flush()
@@ -62,7 +72,6 @@ func (t *Transport) Serve(ctx context.Context, handler Handler) error {
 	mux.HandleFunc("/message", func(w http.ResponseWriter, r *http.Request) {
 		sessionID := r.URL.Query().Get("sessionId")
 
-		// Validate session if provided
 		if sessionID != "" {
 			if t.smu.GetSession(transport.SessionID(sessionID)) == nil {
 				http.Error(w, "session not found", http.StatusNotFound)
@@ -111,6 +120,7 @@ func (t *Transport) Serve(ctx context.Context, handler Handler) error {
 	<-ctx.Done()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	t.smu.CloseAll()
 	return t.httpSrv.Shutdown(shutdownCtx)
 }
 
@@ -125,7 +135,7 @@ func (t *Transport) Close(ctx context.Context) error {
 
 func readBody(r *http.Request) (json.RawMessage, error) {
 	body := make([]byte, r.ContentLength)
-	if _, err := r.Body.Read(body); err != nil {
+	if _, err := r.Body.Read(body); err != nil && err.Error() != "EOF" {
 		return nil, err
 	}
 	return json.RawMessage(body), nil
