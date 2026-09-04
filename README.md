@@ -61,21 +61,23 @@ The framework follows a **Build Complete, Deploy Minimal** principle: the develo
 | Feature | Package |
 |---|---|
 | Core Middleware Chain | `core/middleware` (Logging, Recovery via `Chain`) |
+| Structured Logging | `modules/middleware/logging` (text/JSON, level filtering, field support) |
+| Recovery | `modules/middleware/recovery` (panic recovery, RecoveryError, mcperror integration) |
 | Prometheus Metrics | `modules/middleware/metrics` (via `prometheus/client_golang`) |
 | OpenTelemetry Tracing | `modules/middleware/tracing` (via `otel`) |
 
-### Storage
+### Runtime
 
 | Feature | Package |
 |---|---|
-| In-Memory Store | `modules/storage/memory` |
+| Task Management | `modules/runtime/task` (Task, Manager, Status, Result, cancellation) |
+| Session Management | `modules/runtime/session` (Session, Manager, lifecycle integration) |
 
 ### Integration
 
 | Feature | Package |
-|---|---|
+|||---|
 | Kubernetes Manifests | `integration-kubernetes` (Deployment + Service YAML generation) |
-
 ### Testing
 
 | Feature | Package |
@@ -172,12 +174,17 @@ mcp-go-core/
 │   │   ├── oauth/           # OAuth 2.1 + PKCE
 │   │   └── mtls/            # mTLS (stub)
 │   ├── middleware/
+│   │   ├── logging/         # Structured logging (text/JSON)
+│   │   ├── recovery/        # Panic recovery
 │   │   ├── metrics/         # Prometheus metrics
 │   │   └── tracing/         # OpenTelemetry tracing
-│   └── storage/
-│       └── memory/          # In-memory key-value store
-├── integration-kubernetes/  # K8s deployment manifest generation
-├── internal/                # Build-time tools (not importable by users)
+│   ├── storage/
+│   │   ├── memory/          # In-memory store
+│   │   ├── filesystem/      # Filesystem store (path traversal protection)
+│   │   └── external/        # Redis + PostgreSQL stores
+│   └── runtime/
+│       ├── task/            # Background task management
+│       └── session/         # Session lifecycle management
 │   ├── featuregraph/        # Feature descriptor, graph, resolution, lock
 │   ├── analyzer/            # AST-based Go source analyzer
 │   ├── generator/           # Static Go code generator
@@ -219,8 +226,9 @@ mcp-go-core/
 | `github.com/spf13/cobra` | v1.10.2 | CLI framework |
 | `go.opentelemetry.io/otel` | v1.46.0 | Tracing middleware |
 | `golang.org/x/oauth2` | v0.36.0 | OAuth PKCE support |
+| `github.com/redis/go-redis/v9` | v9.22.0 | Redis storage backend |
+| `github.com/lib/pq` | v1.12.3 | PostgreSQL storage backend |
 | `k8s.io/api` | v0.37.0 | Kubernetes manifest types |
-
 ---
 
 ## Installation
@@ -414,10 +422,52 @@ auth := oauth.NewAuthenticator(
     []string{"read", "write"},
 )
 pkce, _ := oauth.GeneratePKCE()  // RFC 7636
-identity, err := auth.Authenticate(ctx, oauth.HTTPRequest{r})
 ```
 
-### Kubernetes Integration
+### Storage
+
+**External Storage (Redis/PostgreSQL):**
+
+```go
+// Redis
+store := external.NewRedis(external.RedisConfig{
+    Addr:     "localhost:6379",
+    PoolSize: 10,
+})
+
+// PostgreSQL
+pg, _ := external.NewPostgreSQL(external.PostgreSQLConfig{
+    DSN:             "postgres://user:pass@localhost/db?sslmode=disable",
+    MaxOpenConns:    25,
+})
+
+// All stores implement the Store interface
+var s external.Store = store
+```
+
+### Runtime (Tasks & Sessions)
+
+```go
+// Task management with cancellation
+tm := task.NewManager()
+defer tm.Close()
+
+t := tm.Create("my-task", func(ctx context.Context) (task.Result, error) {
+    return task.Result{Data: []byte("done")}, nil
+})
+
+status, _ := tm.Status(t.ID)  // Check status
+err := tm.Cancel(t.ID)        // Cancel if still running
+```
+
+```go
+// Session management with lifecycle
+sm := session.NewManager()
+defer sm.CloseAll()
+
+s, _ := sm.Create("client-session", map[string]any{"client_id": "claude"})
+defer sm.Destroy(s.ID)
+```
 
 ```go
 spec := kubernetes.DeploymentSpec{
@@ -510,7 +560,22 @@ kubernetes.WriteManifests(".", spec)
 | `ShuttingDown` | Graceful shutdown in progress |
 | `Shutdown` | Fully stopped |
 
----
+### modules/runtime/task
+
+| Type | Description |
+|---|---|
+| `Status` | Task state: `pending`, `running`, `completed`, `failed`, `cancelled` |
+| `Result` | Task outcome: `Data []byte`, `Err error` |
+| `Task` | Background task with ID, status, creation/ completion timestamps |
+| `Manager` | Thread-safe task manager: `Create`, `Cancel`, `Status`, `GetResult`, `WaitFor`, `RunningCount` |
+
+### modules/runtime/session
+
+| Type | Description |
+|---|---|
+| `Session` | Active session with ID, metadata, lifecycle state |
+| `Manager` | Session manager: `Create`, `Get`, `Destroy`, `Count`, `ActiveSessions`, `Close`, `CloseAll` |
+
 
 ## Testing
 
