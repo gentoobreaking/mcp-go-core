@@ -182,6 +182,14 @@ func TestDispatchInitialize(t *testing.T) {
 	if result.ServerInfo.Name != "mcp-go-core" {
 		t.Fatalf("expected server name mcp-go-core, got %s", result.ServerInfo.Name)
 	}
+
+	// Verify T088: Logging capability advertised
+	if result.Capabilities.Logging == nil {
+		t.Fatal("expected logging capability to be advertised")
+	}
+	if !result.Capabilities.Resources.Subscribe {
+		t.Fatal("expected resources subscribe capability")
+	}
 }
 
 func TestDispatchNotificationsCancel(t *testing.T) {
@@ -300,7 +308,120 @@ func TestDispatchGetPrompt(t *testing.T) {
 	}
 }
 
-// --- Test helpers ---
+// T088: logging/setLogLevel test
+func TestDispatchSetLogLevel(t *testing.T) {
+	r := NewRouter()
+
+	params := json.RawMessage(`{"level":"debug"}`)
+
+	req := &protocol.Request{
+		JSONRPC: "2.0",
+		ID:      int64Ptr(1),
+		Method:  "logging/setLogLevel",
+		Params:  params,
+	}
+
+	resp, err := r.Dispatch(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Dispatch error: %v", err)
+	}
+
+	if resp.JSONRPC != "2.0" {
+		t.Fatalf("expected jsonrpc 2.0, got %s", resp.JSONRPC)
+	}
+
+	if r.LogLevel() != protocol.LogLevelDebug {
+		t.Fatalf("expected log level debug, got %s", r.LogLevel())
+	}
+}
+
+// T088: sampling/createMessage test
+func TestDispatchCreateMessage(t *testing.T) {
+	r := NewRouter()
+	r.SetSampler(func(ctx context.Context, req *protocol.CreateMessageParams) (*protocol.CreateMessageResult, error) {
+		return &protocol.CreateMessageResult{
+			Role:   "assistant",
+			Content: protocol.Content{Type: "text", Text: "sampled response"},
+			Model:  "test-model",
+		}, nil
+	})
+
+	params := json.RawMessage(`{
+		"messages": [{"role":"user","content":{"type":"text","text":"hello"}}],
+		"maxTokens": 100,
+		"temperature": 0.7,
+		"systemPrompt": "You are helpful"
+	}`)
+
+	req := &protocol.Request{
+		JSONRPC: "2.0",
+		ID:      int64Ptr(1),
+		Method:  "sampling/createMessage",
+		Params:  params,
+	}
+
+	resp, err := r.Dispatch(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Dispatch error: %v", err)
+	}
+
+	if resp.JSONRPC != "2.0" {
+		t.Fatalf("expected jsonrpc 2.0, got %s", resp.JSONRPC)
+	}
+
+	result, ok := resp.Result.(*protocol.CreateMessageResult)
+	if !ok {
+		t.Fatalf("expected *CreateMessageResult, got %T", resp.Result)
+	}
+
+	if result.Content.Text != "sampled response" {
+		t.Fatalf("expected sampled response, got %s", result.Content.Text)
+	}
+	if result.Model != "test-model" {
+		t.Fatalf("expected test-model, got %s", result.Model)
+	}
+}
+
+// T088: sampling/createMessage without handler
+func TestDispatchCreateMessageNoHandler(t *testing.T) {
+	r := NewRouter()
+
+	params := json.RawMessage(`{"messages":[],"maxTokens":100}`)
+
+	req := &protocol.Request{
+		JSONRPC: "2.0",
+		ID:      int64Ptr(1),
+		Method:  "sampling/createMessage",
+		Params:  params,
+	}
+
+	_, err := r.Dispatch(context.Background(), req)
+	if err == nil {
+		t.Fatal("expected error for missing sampler")
+	}
+}
+
+// T088: resources/created notification
+func TestRegisterResourceCreatedNotification(t *testing.T) {
+	r := NewRouter()
+
+	var notifiedURI string
+	var notifiedName string
+	r.SetOnResourceCreated(func(uri, name string) {
+		notifiedURI = uri
+		notifiedName = name
+	})
+
+	res := testResource("mcp://test/1", "Test Resource", "A test resource")
+	r.RegisterResource(res)
+
+	if notifiedURI != "mcp://test/1" {
+		t.Fatalf("expected URI mcp://test/1, got %s", notifiedURI)
+	}
+	if notifiedName != "Test Resource" {
+		t.Fatalf("expected name Test Resource, got %s", notifiedName)
+	}
+}
 
 func int64Ptr(i int64) *int64 { return &i }
 

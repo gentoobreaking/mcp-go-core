@@ -274,3 +274,73 @@ type Notification struct {
 	Method  string          `json:"method"`
 	Params  json.RawMessage `json:"params,omitempty"`
 }
+
+// LogLevel is an MCP logging level.
+type LogLevel string
+
+const (
+	LogLevelDebug LogLevel = "debug"
+	LogLevelInfo  LogLevel = "info"
+	LogLevelNotice LogLevel = "notice"
+	LogLevelWarning LogLevel = "warning"
+	LogLevelError  LogLevel = "error"
+	LogLevelCritical LogLevel = "critical"
+	LogLevelAlert  LogLevel = "alert"
+	LogLevelEmergency LogLevel = "emergency"
+)
+
+// SetLogLevelParams is sent from client to server via logging/setLogLevel.
+type SetLogLevelParams struct {
+	Level LogLevel `json:"level"`
+}
+
+// LoggingMessage is a notification from server to client via logging/message.
+type LoggingMessage struct {
+	Level     LogLevel `json:"level"`
+	Logger    string   `json:"logger,omitempty"`
+	Data     any        `json:"data"`
+}
+
+// SamplingMessage represents a single message in a createMessage response.
+type SamplingMessage struct {
+	Role    string  `json:"role"`
+	Content Content `json:"content"`
+}
+
+// Content is a content block in a sampling message.
+type Content struct {
+	Type     string `json:"type"`               // "text" or "image"
+	Text     string `json:"text,omitempty"`
+	Data     string `json:"data,omitempty"`    // base64 for images
+	MIMEType string `json:"mimeType,omitempty"`
+}
+
+// SamplingMessageParams is sent from server to client via sampling/createMessage.
+type CreateMessageParams struct {
+	Messages           []SamplingMessage     `json:"messages"`
+	MaxTokens          int                   `json:"maxTokens"`
+	Temperature        *float64              `json:"temperature,omitempty"`
+	SystemPrompt       string                `json:"systemPrompt,omitempty"`
+	IncludeContext     string                `json:"includeContext,omitempty"`
+	ContextRole        *SamplingMessage      `json:"contextRole,omitempty"`
+}
+
+// CreateMessageResult is returned by sampling/createMessage.
+type CreateMessageResult struct {
+	Role    string        `json:"role"`
+	Content Content       `json:"content"`
+	Model    string        `json:"model,omitempty"`
+	StopReason string      `json:"stopReason,omitempty"`
+}
+
+// CreatedNotification is sent from server to client when a resource is created.
+type CreatedNotification struct {
+	JSONRPC string           `json:"jsonrpc"`
+	Method  string           `json:"method"`
+	Params  CreatedParams    `json:"params"`
+}
+
+// CreatedParams contains the URI of the created resource.
+type CreatedParams struct {
+	URI string `json:"uri"`
+}

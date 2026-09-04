@@ -17,7 +17,16 @@ type Router struct {
 	tools     map[string]tool.Tool
 	resources map[string]resource.Resource
 	prompts   map[string]prompt.Prompt
+	logLevel  protocol.LogLevel
+	sampler   SamplingHandler
+	onResourceCreated CreatedNotifier
 }
+
+// SamplingHandler is called when the client sends sampling/createMessage.
+type SamplingHandler func(ctx context.Context, req *protocol.CreateMessageParams) (*protocol.CreateMessageResult, error)
+
+// CreatedNotifier sends a resources/created notification when a resource is registered.
+type CreatedNotifier func(uri, name string)
 
 // NewRouter creates a new Router.
 func NewRouter() *Router {
@@ -25,7 +34,28 @@ func NewRouter() *Router {
 		tools:     make(map[string]tool.Tool),
 		resources: make(map[string]resource.Resource),
 		prompts:   make(map[string]prompt.Prompt),
+		logLevel:  protocol.LogLevelInfo,
 	}
+}
+
+// SetLogLevel sets the server log level.
+func (r *Router) SetLogLevel(level protocol.LogLevel) {
+	r.logLevel = level
+}
+
+// LogLevel returns the current log level.
+func (r *Router) LogLevel() protocol.LogLevel {
+	return r.logLevel
+}
+
+// SetSampler registers a handler for sampling/createMessage.
+func (r *Router) SetSampler(h SamplingHandler) {
+	r.sampler = h
+}
+
+// SetOnResourceCreated registers a notification callback for resources/created.
+func (r *Router) SetOnResourceCreated(fn CreatedNotifier) {
+	r.onResourceCreated = fn
 }
 
 // RegisterTool adds a tool to the router.
@@ -33,9 +63,13 @@ func (r *Router) RegisterTool(t tool.Tool) {
 	r.tools[t.Name()] = t
 }
 
-// RegisterResource adds a resource to the router.
+// RegisterResource adds a resource to the router and emits a
+// notifications/resources/created notification to any registered handler.
 func (r *Router) RegisterResource(res resource.Resource) {
 	r.resources[res.URI()] = res
+	if r.onResourceCreated != nil {
+		r.onResourceCreated(res.URI(), res.Name())
+	}
 }
 
 // RegisterPrompt adds a prompt to the router.
@@ -60,6 +94,10 @@ func (r *Router) Dispatch(ctx context.Context, req *protocol.Request) (*protocol
 		return r.dispatchListPrompts(ctx, req)
 	case "prompts/get":
 		return r.dispatchGetPrompt(ctx, req)
+	case "logging/setLogLevel":
+		return r.dispatchSetLogLevel(ctx, req)
+	case "sampling/createMessage":
+		return r.dispatchCreateMessage(ctx, req)
 	case "notifications/cancel":
 		// Notification — client requesting cancellation of in-flight request
 		// Parse cancel params: { "requestId": <id> }
@@ -82,8 +120,9 @@ func (r *Router) handleInitialize(ctx context.Context, req *protocol.Request) (*
 		ProtocolVersion: "2024-11-05",
 		Capabilities: protocol.ServerCapabilities{
 			Tools:     &protocol.ToolsCapability{ListAvailable: true, Call: true},
-			Resources: &protocol.ResourcesCapability{ListAvailable: true, Get: true},
+			Resources: &protocol.ResourcesCapability{ListAvailable: true, Get: true, Subscribe: true},
 			Prompts:   &protocol.PromptsCapability{ListAvailable: true, Get: true},
+			Logging:   &protocol.LoggingCapability{Log: true},
 		},
 		ServerInfo: protocol.Implementation{
 			Name:    "mcp-go-core",
@@ -212,5 +251,45 @@ func (r *Router) dispatchGetPrompt(ctx context.Context, req *protocol.Request) (
 		JSONRPC: "2.0",
 		ID:      req.ID,
 		Result:  resp,
+}, nil
+}
+
+// dispatchSetLogLevel sets the server log level.
+func (r *Router) dispatchSetLogLevel(ctx context.Context, req *protocol.Request) (*protocol.Response, error) {
+	var params protocol.SetLogLevelParams
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return nil, mcperror.NewInvalidParamsError("invalid setLogLevel params: " + err.Error())
+	}
+
+	r.SetLogLevel(params.Level)
+
+	return &protocol.Response{
+		JSONRPC: "2.0",
+		ID:      req.ID,
+		Result:  nil,
+	}, nil
+}
+
+// dispatchCreateMessage handles sampling/createMessage by delegating to the
+// registered SamplingHandler.
+func (r *Router) dispatchCreateMessage(ctx context.Context, req *protocol.Request) (*protocol.Response, error) {
+	if r.sampler == nil {
+		return nil, mcperror.NewError(mcperror.CodeProtocol, "sampling not supported")
+	}
+
+	var params protocol.CreateMessageParams
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return nil, mcperror.NewInvalidParamsError("invalid createMessage params: " + err.Error())
+	}
+
+	result, err := r.sampler(ctx, &params)
+	if err != nil {
+		return nil, err
+	}
+
+	return &protocol.Response{
+		JSONRPC: "2.0",
+		ID:      req.ID,
+		Result:  result,
 	}, nil
 }

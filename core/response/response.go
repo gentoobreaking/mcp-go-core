@@ -1,7 +1,11 @@
 // Package response provides MCP response types for tools, resources, and prompts.
 package response
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	"github.com/project/mcp-go-core/core/prompt"
+)
 
 // ToolResponse is the result of a tools/call.
 type ToolResponse struct {
@@ -32,13 +36,11 @@ type ResourceContent struct {
 }
 
 // PromptResponse is the result of prompts/get.
-type PromptResponse struct {
-	Description string      `json:"description,omitempty"`
-	Messages    []PromptMsg `json:"messages"`
-}
+// Aliased to prompt.PromptResponse for spec-compliant JSON serialization.
 
 // PromptMsg is a single message in a prompt response.
-type PromptMsg struct {
-	Role    string `json:"role"`    // "user" or "assistant"
-	Content string `json:"content"`
-}
+// Deprecated: Use prompt.PromptMessage from core/prompt package.
+type PromptMsg = prompt.PromptMessage
+
+// PromptResponse aliases prompt.PromptResponse.
+type PromptResponse = prompt.PromptResponse
