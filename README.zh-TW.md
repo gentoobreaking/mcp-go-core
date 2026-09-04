@@ -194,7 +194,12 @@ mcp-go-core/
 ├── examples/                # 範例 MCP 伺服器
 │   └── minimal/             # 最小化 MCP 伺服器範例
 ├── go.mod
+├── go.sum
+├── Dockerfile
+├── docker-compose.yml
+├── .dockerignore
 ├── Makefile
+├── LICENSE
 └── README.md
 ```
 
@@ -552,9 +557,24 @@ go build -o dist/mcp-go-core ./cmd/mcp-go-core
 CGO_ENABLED=0 go build -ldflags="-s -w" -o dist/mcp-go-core ./cmd/mcp-go-core
 ```
 
-### 建置管道
 
-CLI 提供完整建置管道：
+### Docker 建置
+
+```bash
+# 建置 Docker 映像
+make docker-build
+
+# 使用 docker-compose 運行（HTTP + Prometheus + Grafana）
+make docker-run
+
+# 推送到登錄（需設定 DOCKER_REGISTRY 環境變數）
+make docker-push DOCKER_REGISTRY=ghcr.io/project
+
+# 清理
+make docker-clean
+```
+
+### 建置管道
 
 ```bash
 mcp-go-core init --name my-server --profile production
@@ -609,12 +629,28 @@ mcp-go-core run --transport http --addr 0.0.0.0:8080 --metrics --tracing
 
 ## 安全
 
-### 設計原則
+### 容器化部署
 
-- Core **無驗證需求** — 認證為選用模組
-- API Key 驗證於 `modules/security/api_key`
-- JWT 驗證於 `modules/security/jwt`（HMAC-SHA256）
-- OAuth 2.1 + PKCE 於 `modules/security/oauth`（RFC 7636）
+使用 Docker 建置並運行：
+
+```bash
+mcp-go-core build --output dist/mcp-go-core --profile production
+docker build -t mcp-go-core:v0.1.0 .
+docker run -p 8080:8080 mcp-go-core:v0.1.0 \
+  mcp-go-core run --transport http --addr 0.0.0.0:8080 --metrics
+```
+
+使用 docker-compose 進行本地開發（HTTP + Prometheus + Grafana）：
+
+```bash
+docker compose --profile production up -d
+```
+
+| 服務 | URL | 配置檔案 |
+|---|---|---|
+| MCP 伺服器（HTTP） | http://localhost:8080 | production |
+| Prometheus | http://localhost:9090 | production |
+| Grafana | http://localhost:3000 | production |
 
 ### 安全驗證
 

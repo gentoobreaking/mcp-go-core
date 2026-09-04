@@ -194,7 +194,12 @@ mcp-go-core/
 ├── examples/                # Example MCP servers
 │   └── minimal/             # Minimal MCP server example
 ├── go.mod
+├── go.sum
+├── Dockerfile
+├── docker-compose.yml
+├── .dockerignore
 ├── Makefile
+├── LICENSE
 └── README.md
 ```
 
@@ -555,9 +560,23 @@ go build -o dist/mcp-go-core ./cmd/mcp-go-core
 CGO_ENABLED=0 go build -ldflags="-s -w" -o dist/mcp-go-core ./cmd/mcp-go-core
 ```
 
-### Build Pipeline
+### Docker Build
 
-The CLI exposes a full build pipeline:
+```bash
+# Build Docker image
+make docker-build
+
+# Run with docker-compose (HTTP + Prometheus + Grafana)
+make docker-run
+
+# Push to registry (requires DOCKER_REGISTRY and DOCKER_REGISTRY env)
+make docker-push DOCKER_REGISTRY=ghcr.io/project
+
+# Clean up
+make docker-clean
+```
+
+### Build Pipeline
 
 ```bash
 mcp-go-core init --name my-server --profile production
@@ -606,7 +625,28 @@ HTTP + Metrics + Tracing:
 mcp-go-core run --transport http --addr 0.0.0.0:8080 --metrics --tracing
 ```
 
-[NEEDS VERIFICATION: Containerized deployment toolchain (Dockerfile, docker-compose.yml, CI image build/push) is not yet implemented. K8s manifest generation is available via `mcp-go-core k8s`, but no container image building, registry push, or deployment automation exists. Documentation will be provided when runtime deployment tooling is complete.]
+### Containerized Deployment
+
+Build and run with Docker:
+
+```bash
+mcp-go-core build --output dist/mcp-go-core --profile production
+docker build -t mcp-go-core:v0.1.0 .
+docker run -p 8080:8080 mcp-go-core:v0.1.0 \
+  mcp-go-core run --transport http --addr 0.0.0.0:8080 --metrics
+```
+
+Local development with docker-compose (HTTP + Prometheus + Grafana):
+
+```bash
+docker compose --profile production up -d
+```
+
+| Service | URL | Profile |
+|---|---|---|
+| MCP Server (HTTP) | http://localhost:8080 | production |
+| Prometheus | http://localhost:9090 | production |
+| Grafana | http://localhost:3000 | production |
 
 ---
 

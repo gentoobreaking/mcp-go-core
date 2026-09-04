@@ -1,0 +1,51 @@
+services:
+  mcp-go-core:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: mcp-go-core:v0.1.0
+    container_name: mcp-go-core
+    ports:
+      - "8080:8080"
+    environment:
+      MCP_TRANSPORT: stdio
+      MCP_METRICS: "true"
+      MCP_TRACING: "false"
+      MCP_OAUTH: "false"
+    restart: unless-stopped
+    profiles: ["minimal"]
+
+  http:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: mcp-go-core:v0.1.0
+    container_name: mcp-go-core-http
+    ports:
+      - "8080:8080"
+    command: ["run", "--transport", "http", "--addr", "0.0.0.0:8080", "--metrics"]
+    depends_on:
+      - prometheus
+    environment:
+      MCP_TRANSPORT: http
+    profiles: ["production"]
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: mcp-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./docker/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    profiles: ["production"]
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: mcp-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: "admin"
+    depends_on:
+      - prometheus
+    profiles: ["production"]

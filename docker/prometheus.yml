@@ -1,0 +1,7 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: "mcp-go-core"
+    static_configs:
+      - targets: ["mcp-go-core:8080"]

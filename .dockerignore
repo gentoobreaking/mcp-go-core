@@ -1,0 +1,16 @@
+.git
+.gitignore
+README.md
+README.zh-TW.md
+LICENSE
+Dockerfile
+docker-compose*.yml
+.mcp/
+dist/
+verification/
+tests/
+benchmarks/
+docs/
+*.md
+.github/
+Makefile
