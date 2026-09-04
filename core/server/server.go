@@ -10,6 +10,7 @@ import (
 
 	"github.com/project/mcp-go-core/core/feature"
 	"github.com/project/mcp-go-core/core/mcperror"
+	"github.com/project/mcp-go-core/core/middleware/ratelimit"
 	"github.com/project/mcp-go-core/core/prompt"
 	"github.com/project/mcp-go-core/core/protocol"
 	"github.com/project/mcp-go-core/core/resource"
@@ -26,6 +27,7 @@ type Server struct {
 	transport   Transport
 	mw          []Middleware
 	flags       *feature.Flags
+	lim         *ratelimit.Manager
 	shutdownCh  chan struct{}
 	wg          sync.WaitGroup
 	timeout     time.Duration
@@ -46,10 +48,14 @@ func WithVersion(version string) Option {
 	return func(s *Server) { s.version = version }
 }
 
-
 // WithFlags sets feature flags for the server.
 func WithFlags(f *feature.Flags) Option {
 	return func(s *Server) { s.flags = f }
+}
+
+// WithRateLimiter sets a rate limiter manager for the server.
+func WithRateLimiter(lim *ratelimit.Manager) Option {
+	return func(s *Server) { s.lim = lim }
 }
 
 // WithShutdownTimeout sets the shutdown timeout.
@@ -113,13 +119,19 @@ func (s *Server) handleMessage(ctx context.Context, msg json.RawMessage) (any, e
 		return nil, fmt.Errorf("parse error: %w", err)
 	}
 
-	// Feature flag gate: if flags are configured and the method's flag is
-	// disabled, reject before dispatch.
+	// Feature flag gate: ... (existing)
 	if s.flags != nil {
 		flagName := flagNameForMethod(req.Method)
 		if flagName != "" && s.flags.IsDisabled(flagName) {
 			return nil, mcperror.NewError(mcperror.CodeValidation,
 				fmt.Sprintf("feature flag '%s' is disabled", flagName))
+		}
+	}
+
+	// Rate limit gate: per-method token bucket
+	if s.lim != nil {
+		if err := s.lim.Allow(req.Method); err != nil {
+			return nil, err
 		}
 	}
 

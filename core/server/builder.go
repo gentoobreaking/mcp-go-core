@@ -7,6 +7,7 @@ import (
 
 	"github.com/project/mcp-go-core/core/feature"
 	"github.com/project/mcp-go-core/core/middleware"
+	"github.com/project/mcp-go-core/core/middleware/ratelimit"
 	"github.com/project/mcp-go-core/core/prompt"
 	"github.com/project/mcp-go-core/core/resource"
 	"github.com/project/mcp-go-core/core/router"
@@ -32,6 +33,7 @@ type Builder struct {
 	resources []resource.Resource
 	prompts   []prompt.Prompt
 	flags     *feature.Flags
+	lim       *ratelimit.Manager
 	transport Transport
 	mw        []Middleware
 	built     bool
@@ -92,6 +94,14 @@ func (b *Builder) WithFlags(f *feature.Flags) *Builder {
 	return b
 }
 
+// WithRateLimiter configures a rate limiter for the server.
+func (b *Builder) WithRateLimiter(lim *ratelimit.Manager) *Builder {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.lim = lim
+	return b
+}
+
 // WithTransport sets the transport.
 func (b *Builder) WithTransport(t Transport) *Builder {
 	b.mu.Lock()
@@ -124,6 +134,7 @@ func (b *Builder) Build() (*Server, error) {
 		shutdownCh: make(chan struct{}),
 		timeout:    b.timeout,
 		flags:      b.flags,
+		lim:        b.lim,
 		transport:  b.transport,
 		mw:         b.mw,
 	}
@@ -136,6 +147,11 @@ func (b *Builder) Build() (*Server, error) {
 	}
 	for _, p := range b.prompts {
 		s.router.RegisterPrompt(p)
+	}
+
+	// If no rate limiter configured, use defaults
+	if s.lim == nil {
+		s.lim = ratelimit.NewManager()
 	}
 
 	b.built = true
