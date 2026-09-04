@@ -4,6 +4,7 @@ package router
 import (
 	"context"
 	"encoding/json"
+	"strings"
 
 	"github.com/project/mcp-go-core/core/mcperror"
 	"github.com/project/mcp-go-core/core/protocol"
@@ -20,6 +21,8 @@ type Router struct {
 	logLevel  protocol.LogLevel
 	sampler   SamplingHandler
 	onResourceCreated CreatedNotifier
+	subscriptions map[string]bool
+	rootsHandler    func() error
 }
 
 // SamplingHandler is called when the client sends sampling/createMessage.
@@ -35,6 +38,7 @@ func NewRouter() *Router {
 		resources: make(map[string]resource.Resource),
 		prompts:   make(map[string]prompt.Prompt),
 		logLevel:  protocol.LogLevelInfo,
+		subscriptions: make(map[string]bool),
 	}
 }
 
@@ -100,15 +104,126 @@ func (r *Router) Dispatch(ctx context.Context, req *protocol.Request) (*protocol
 		return r.dispatchCreateMessage(ctx, req)
 	case "notifications/cancel":
 		// Notification — client requesting cancellation of in-flight request
-		// Parse cancel params: { "requestId": <id> }
 		return &protocol.Response{JSONRPC: "2.0", ID: req.ID, Result: nil}, nil
 	case "initialized":
 		// Notification — no response needed
 		return &protocol.Response{JSONRPC: "2.0", ID: req.ID, Result: nil}, nil
+	case "ping":
+		return r.dispatchPing(ctx, req)
+	case "complete":
+		return r.dispatchComplete(ctx, req)
+	case "notifications/roots/list_changed":
+		return r.dispatchRootsListChanged(ctx, req)
+	case "resources/subscribe":
+		return r.dispatchSubscribe(ctx, req)
 	default:
 		return nil, mcperror.NewError(mcperror.CodeProtocol, "method not found: "+req.Method)
 	}
 }
+
+
+// dispatchPing handles the ping method — returns "pong".
+func (r *Router) dispatchPing(ctx context.Context, req *protocol.Request) (*protocol.Response, error) {
+	return &protocol.Response{
+		JSONRPC: "2.0",
+		ID:      req.ID,
+		Result:  protocol.PingResult{},
+	}, nil
+}
+
+// dispatchComplete handles complete/arg and complete/prompt requests.
+func (r *Router) dispatchComplete(ctx context.Context, req *protocol.Request) (*protocol.Response, error) {
+	var params protocol.CompletionParams
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return nil, mcperror.NewInvalidParamsError("invalid complete params: " + err.Error())
+	}
+
+	// Provide completion values based on context
+	values := r.completeValues(params)
+
+	return &protocol.Response{
+		JSONRPC: "2.0",
+		ID:      req.ID,
+		Result: protocol.CompleteResult{
+			Completion: protocol.CompletionResult{
+				Values: values,
+			},
+		},
+	}, nil
+}
+
+// completeValues returns completion candidates for the given params.
+func (r *Router) completeValues(params protocol.CompletionParams) []string {
+	// Argument value "true"/"false" completion for booleans
+	if params.Value == "" || strings.HasPrefix(strings.ToLower(params.Value), "true") || strings.HasPrefix(strings.ToLower(params.Value), "false") {
+		if params.ArgumentName == "enabled" || params.ArgumentName == "verbose" {
+			return []string{"true", "false"}
+		}
+	}
+
+	// Tool/prompt reference completion
+	if params.Ref.Kind == "tool" || params.Ref.Kind == "prompt" {
+		var names []string
+		if params.Ref.Kind == "tool" {
+			for name := range r.tools {
+				names = append(names, name)
+			}
+		} else {
+			for name := range r.prompts {
+				names = append(names, name)
+			}
+		}
+		return names
+	}
+
+	return nil
+}
+
+// dispatchRootsListChanged handles notifications/roots/list_changed.
+func (r *Router) dispatchRootsListChanged(ctx context.Context, req *protocol.Request) (*protocol.Response, error) {
+	// Trigger roots refresh hook if registered
+	if r.rootsHandler != nil {
+		_ = r.rootsHandler()
+	}
+	// Notification — no response body needed, but return JSON-RPC ack
+	return &protocol.Response{
+		JSONRPC: "2.0",
+		ID:      req.ID,
+		Result:  nil,
+	}, nil
+}
+
+// dispatchSubscribe handles resources/subscribe requests.
+func (r *Router) dispatchSubscribe(ctx context.Context, req *protocol.Request) (*protocol.Response, error) {
+	var params protocol.SubscribeParams
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return nil, mcperror.NewInvalidParamsError("invalid subscribe params: " + err.Error())
+	}
+
+	if params.URI == "" {
+		return nil, mcperror.NewInvalidParamsError("uri is required")
+	}
+
+	r.subscriptions[params.URI] = true
+
+	return &protocol.Response{
+		JSONRPC: "2.0",
+		ID:      req.ID,
+		Result: struct{}{},
+	}, nil
+}
+
+// SetRootsHandler registers a callback invoked when the client sends
+// notifications/roots/list_changed.
+func (r *Router) SetRootsHandler(handler func() error) {
+	r.rootsHandler = handler
+}
+
+// IsSubscribed returns whether a resource URI has an active subscription.
+func (r *Router) IsSubscribed(uri string) bool {
+	return r.subscriptions[uri]
+}
+
 // handleInitialize processes the initialize request handshake.
 func (r *Router) handleInitialize(ctx context.Context, req *protocol.Request) (*protocol.Response, error) {
 	var initReq protocol.InitializeRequest

@@ -1,8 +1,10 @@
 package protocol
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"time"
+)
 
-// Standard JSON-RPC 2.0 error codes.
 const (
 	ParsedErrorCode       = -32700 // parse_error
 	InvalidRequestCode    = -32600 // invalid_request
@@ -343,4 +345,52 @@ type CreatedNotification struct {
 // CreatedParams contains the URI of the created resource.
 type CreatedParams struct {
 	URI string `json:"uri"`
+}
+
+// PingResult is returned by ping method.
+type PingResult struct {
+	// Returns the string "pong" per JSON-RPC convention.
+	Message string `json:"message,omitempty"`
+}
+
+// CompletionParams is the request params for complete/arg and complete/prompt.
+type CompletionParams struct {
+	// Option 1: Static, prompt-based completion
+	// ref: #/tools or #/prompts
+	Ref struct {
+		Kind string `json:"kind"`
+		Name string `json:"name,omitempty"`
+	} `json:"ref,omitempty"`
+	// Argument name being completed
+	ArgumentName string `json:"argumentName,omitempty"`
+	// Current value text to complete
+	Value string `json:"value,omitempty"`
+}
+
+// CompletionResult is returned by complete/arg and complete/prompt.
+type CompletionResult struct {
+	Values []string `json:"values"`
+	// Whether there are more completions available
+		HasMore bool `json:"hasMore,omitempty"`
+}
+
+// CompleteResult wraps CompletionResult for JSON-RPC responses.
+type CompleteResult struct {
+	Completion CompletionResult `json:"completion"`
+}
+
+// SubscribeParams is the request params for resources/subscribe.
+type SubscribeParams struct {
+	URI string `json:"uri"`
+}
+
+// Subscription represents an active resource subscription.
+type Subscription struct {
+	URI      string `json:"uri"`
+	SubscribedAt time.Time `json:"subscribedAt"`
+}
+
+// RootsListChangedParams is sent from client to server via notifications/roots/list_changed.
+type RootsListChangedParams struct {
+	// Empty params; notification only
 }

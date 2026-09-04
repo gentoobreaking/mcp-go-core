@@ -461,3 +461,147 @@ func testPrompt(name, desc string) prompt.Prompt {
 		},
 	)
 }
+
+// T089: ping method
+func TestDispatchPing(t *testing.T) {
+	r := NewRouter()
+
+	req := &protocol.Request{
+		JSONRPC: "2.0",
+		ID:      int64Ptr(1),
+		Method:  "ping",
+	}
+
+	resp, err := r.Dispatch(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Dispatch error: %v", err)
+	}
+
+	if resp.JSONRPC != "2.0" {
+		t.Fatalf("expected jsonrpc 2.0, got %s", resp.JSONRPC)
+	}
+}
+
+// T089: complete/arg method
+func TestDispatchComplete(t *testing.T) {
+	r := NewRouter()
+	r.RegisterTool(testTool("myTool", "a test tool"))
+	r.RegisterTool(testTool("otherTool", "another tool"))
+
+	params := json.RawMessage(`{"ref":{"kind":"tool"},"argumentName":"name","value":""}`)
+
+	req := &protocol.Request{
+		JSONRPC: "2.0",
+		ID:      int64Ptr(1),
+		Method:  "complete",
+		Params:  params,
+	}
+
+	resp, err := r.Dispatch(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Dispatch error: %v", err)
+	}
+
+	result, ok := resp.Result.(protocol.CompleteResult)
+	if !ok {
+		t.Fatalf("expected CompleteResult, got %T", resp.Result)
+	}
+
+	values := result.Completion.Values
+	if len(values) != 2 {
+		t.Fatalf("expected 2 completion values, got %d", len(values))
+	}
+}
+
+// T089: complete with invalid params
+func TestDispatchCompleteInvalidParams(t *testing.T) {
+	r := NewRouter()
+
+	params := json.RawMessage(`{invalid`)
+
+	req := &protocol.Request{
+		JSONRPC: "2.0",
+		ID:      int64Ptr(1),
+		Method:  "complete",
+		Params:  params,
+	}
+
+	_, err := r.Dispatch(context.Background(), req)
+	if err == nil {
+		t.Fatal("expected error for invalid params")
+	}
+}
+
+// T089: notifications/roots/list_changed
+func TestDispatchRootsListChanged(t *testing.T) {
+	r := NewRouter()
+
+	called := false
+	r.SetRootsHandler(func() error {
+		called = true
+		return nil
+	})
+
+	req := &protocol.Request{
+		JSONRPC: "2.0",
+		ID:      int64Ptr(1),
+		Method:  "notifications/roots/list_changed",
+	}
+
+	resp, err := r.Dispatch(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Dispatch error: %v", err)
+	}
+
+	if !called {
+		t.Fatal("expected roots handler to be called")
+	}
+
+	if resp.JSONRPC != "2.0" {
+		t.Fatalf("expected jsonrpc 2.0, got %s", resp.JSONRPC)
+	}
+}
+
+// T089: resources/subscribe
+func TestDispatchSubscribe(t *testing.T) {
+	r := NewRouter()
+
+	params := json.RawMessage(`{"uri":"mcp://test/1"}`)
+
+	req := &protocol.Request{
+		JSONRPC: "2.0",
+		ID:      int64Ptr(1),
+		Method:  "resources/subscribe",
+		Params:  params,
+	}
+
+	resp, err := r.Dispatch(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Dispatch error: %v", err)
+	}
+
+	if resp.JSONRPC != "2.0" {
+		t.Fatalf("expected jsonrpc 2.0, got %s", resp.JSONRPC)
+	}
+
+	if !r.IsSubscribed("mcp://test/1") {
+		t.Fatal("expected subscription to be stored")
+	}
+}
+
+// T089: resources/subscribe with missing URI
+func TestDispatchSubscribeMissingURI(t *testing.T) {
+	r := NewRouter()
+
+	req := &protocol.Request{
+		JSONRPC: "2.0",
+		ID:      int64Ptr(1),
+		Method:  "resources/subscribe",
+		Params:  json.RawMessage(`{}`),
+	}
+
+	_, err := r.Dispatch(context.Background(), req)
+	if err == nil {
+		t.Fatal("expected error for missing uri")
+	}
+}
