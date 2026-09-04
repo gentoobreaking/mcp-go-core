@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/project/mcp-go-core/core/feature"
 	"github.com/project/mcp-go-core/core/middleware"
 	"github.com/project/mcp-go-core/core/prompt"
 	"github.com/project/mcp-go-core/core/protocol"
@@ -179,4 +180,22 @@ func TestBuilderFluentAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = srv
+	_ = srv
+}
+
+func TestServerWithFlags(t *testing.T) {
+	tr := stdio.New(nil, nil)
+	flags := feature.NewFlags(map[string]bool{"advanced": true})
+	s := NewBuilder().
+		WithTool(&mockTool{name: "t1"}).
+		WithFlags(flags).
+		WithTransport(tr).
+		MustBuild()
+
+	if s.flags == nil {
+		t.Fatal("expected flags to be set")
+	}
+	if !s.flags.Get("advanced").Enabled {
+		t.Fatal("expected advanced flag to be enabled")
+	}
 }

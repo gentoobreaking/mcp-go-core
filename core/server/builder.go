@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/project/mcp-go-core/core/feature"
 	"github.com/project/mcp-go-core/core/middleware"
 	"github.com/project/mcp-go-core/core/prompt"
 	"github.com/project/mcp-go-core/core/resource"
@@ -18,7 +19,6 @@ type Transport = transport.Transport
 
 // Middleware wraps a Handler to add cross-cutting behavior.
 type Middleware = middleware.Middleware
-
 // Handler is the interface for processing requests.
 type Handler = middleware.Handler
 
@@ -31,6 +31,7 @@ type Builder struct {
 	tools     []tool.Tool
 	resources []resource.Resource
 	prompts   []prompt.Prompt
+	flags     *feature.Flags
 	transport Transport
 	mw        []Middleware
 	built     bool
@@ -83,6 +84,13 @@ func (b *Builder) WithPrompt(p prompt.Prompt) *Builder {
 	b.prompts = append(b.prompts, p)
 	return b
 }
+// WithFlags configures feature flags for the server.
+func (b *Builder) WithFlags(f *feature.Flags) *Builder {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.flags = f
+	return b
+}
 
 // WithTransport sets the transport.
 func (b *Builder) WithTransport(t Transport) *Builder {
@@ -115,6 +123,7 @@ func (b *Builder) Build() (*Server, error) {
 		router:     router.NewRouter(),
 		shutdownCh: make(chan struct{}),
 		timeout:    b.timeout,
+		flags:      b.flags,
 		transport:  b.transport,
 		mw:         b.mw,
 	}

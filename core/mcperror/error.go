@@ -16,6 +16,7 @@ const (
 	CodeInternal      = "internal"
 	CodeTimeout       = "timeout"
 	CodeCancellation  = "cancellation"
+	CodeRateLimit     = "rate_limit"
 )
 
 // JSON-RPC 2.0 standard error codes.

@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/project/mcp-go-core/core/feature"
+	"github.com/project/mcp-go-core/core/mcperror"
 	"github.com/project/mcp-go-core/core/prompt"
 	"github.com/project/mcp-go-core/core/protocol"
 	"github.com/project/mcp-go-core/core/resource"
@@ -15,7 +17,6 @@ import (
 	"github.com/project/mcp-go-core/core/tool"
 	"github.com/project/mcp-go-core/modules/transport"
 )
-
 // Server represents an MCP server with lifecycle management.
 type Server struct {
 	mu          sync.RWMutex
@@ -24,6 +25,7 @@ type Server struct {
 	router      *router.Router
 	transport   Transport
 	mw          []Middleware
+	flags       *feature.Flags
 	shutdownCh  chan struct{}
 	wg          sync.WaitGroup
 	timeout     time.Duration
@@ -42,6 +44,12 @@ func WithName(name string) Option {
 // WithVersion sets the server version.
 func WithVersion(version string) Option {
 	return func(s *Server) { s.version = version }
+}
+
+
+// WithFlags sets feature flags for the server.
+func WithFlags(f *feature.Flags) Option {
+	return func(s *Server) { s.flags = f }
 }
 
 // WithShutdownTimeout sets the shutdown timeout.
@@ -105,11 +113,35 @@ func (s *Server) handleMessage(ctx context.Context, msg json.RawMessage) (any, e
 		return nil, fmt.Errorf("parse error: %w", err)
 	}
 
+	// Feature flag gate: if flags are configured and the method's flag is
+	// disabled, reject before dispatch.
+	if s.flags != nil {
+		flagName := flagNameForMethod(req.Method)
+		if flagName != "" && s.flags.IsDisabled(flagName) {
+			return nil, mcperror.NewError(mcperror.CodeValidation,
+				fmt.Sprintf("feature flag '%s' is disabled", flagName))
+		}
+	}
+
 	resp, err := s.router.Dispatch(ctx, &req)
 	if err != nil {
 		return nil, err
 	}
 	return resp.Result, nil
+}
+
+// flagNameForMethod maps an MCP method to its feature flag name.
+// Empty string means no flag gating (always allowed).
+func flagNameForMethod(method string) string {
+	switch {
+	case len(method) > 10 && method[:10] == "tools/call":
+		return method[10:]
+	case len(method) > 11 && method[:11] == "resources/":
+		return method[11:]
+	case len(method) > 8 && method[:8] == "prompts/":
+		return method[8:]
+	}
+	return ""
 }
 
 // Run starts the server and blocks until context is cancelled.
