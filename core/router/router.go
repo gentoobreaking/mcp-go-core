@@ -453,6 +453,10 @@ func (r *Router) DeleteResource(uri string) error {
 // NotifyResourceDeleted emits a notifications/resources/deleted notification
 // to all clients subscribed to the given URI.
 func (r *Router) NotifyResourceDeleted(uri string) error {
+	clients, ok := r.subscriptions[uri]
+	if !ok || len(clients) == 0 {
+		return nil // no subscribers
+	}
 	notify := protocol.ResourceDeletedNotification{
 		JSONRPC: "2.0",
 		Method:  "notifications/resources/deleted",
