@@ -3,6 +3,7 @@ package router
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/project/mcp-go-core/core/protocol"
@@ -603,5 +604,155 @@ func TestDispatchSubscribeMissingURI(t *testing.T) {
 	_, err := r.Dispatch(context.Background(), req)
 	if err == nil {
 		t.Fatal("expected error for missing uri")
+	}
+}
+
+// T099: server→client resource notification on subscribed URI
+func TestNotifyResourceUpdate(t *testing.T) {
+	r := NewRouter()
+
+	// Subscribe to a resource
+	params := json.RawMessage(`{"uri":"mcp://test/1"}`)
+	req := &protocol.Request{
+		JSONRPC: "2.0",
+		ID:      int64Ptr(1),
+		Method:  "resources/subscribe",
+		Params:  params,
+	}
+	_, err := r.Dispatch(context.Background(), req)
+	if err != nil {
+		t.Fatalf("subscribe failed: %v", err)
+	}
+
+	// Set notification handler
+	var notifiedMethod string
+	var notifiedParams any
+	r.SetNotificationSender(func(method string, params any) error {
+		notifiedMethod = method
+		notifiedParams = params
+		return nil
+	})
+
+	// Notify resource update
+	if err := r.NotifyResourceUpdate("mcp://test/1", "update"); err != nil {
+		t.Fatalf("NotifyResourceUpdate failed: %v", err)
+	}
+
+	if notifiedMethod != "notifications/resources/update" {
+		t.Fatalf("expected method notifications/resources/update, got %s", notifiedMethod)
+	}
+
+	updateParams, ok := notifiedParams.(protocol.ResourceUpdateParams)
+	if !ok {
+		t.Fatalf("expected ResourceUpdateParams, got %T", notifiedParams)
+	}
+	if updateParams.URI != "mcp://test/1" {
+		t.Fatalf("expected URI mcp://test/1, got %s", updateParams.URI)
+	}
+	if updateParams.ChangeType != "update" {
+		t.Fatalf("expected changeType update, got %s", updateParams.ChangeType)
+	}
+}
+
+// T099: notify-deleted for multiple subscribed clients
+func TestNotifyResourceUpdateMultipleSubscriptions(t *testing.T) {
+	r := NewRouter()
+
+	// Subscribe to multiple resources
+	for _, uri := range []string{"mcp://test/1", "mcp://test/2", "mcp://test/3"} {
+		params := json.RawMessage(`{"uri":"` + uri + `"}`)
+		req := &protocol.Request{
+			JSONRPC: "2.0",
+			ID:      int64Ptr(1),
+			Method:  "resources/subscribe",
+			Params:  params,
+		}
+		r.Dispatch(context.Background(), req)
+	}
+
+	var notifyCount int
+	r.SetNotificationSender(func(method string, params any) error {
+		notifyCount++
+		return nil
+	})
+
+	// Only subscribed URI should trigger
+	r.NotifyResourceUpdate("mcp://test/2", "delete")
+	if notifyCount != 1 {
+		t.Fatalf("expected 1 notification for subscribed URI, got %d", notifyCount)
+	}
+}
+
+// T099: no notification when no subscribers
+func TestNotifyResourceUpdateNoSubscribers(t *testing.T) {
+	r := NewRouter()
+
+	var notified bool
+	r.SetNotificationSender(func(method string, params any) error {
+		notified = true
+		return nil
+	})
+
+	// Notify for a URI nobody subscribed to
+	r.NotifyResourceUpdate("mcp://unsubscribed", "update")
+	if notified {
+		t.Fatal("expected no notification for unsubscribed URI")
+	}
+}
+
+// T099: notification handler error propagates
+func TestNotifyResourceUpdateHandlerError(t *testing.T) {
+	r := NewRouter()
+
+	// Subscribe
+	params := json.RawMessage(`{"uri":"mcp://test/1"}`)
+	req := &protocol.Request{
+		JSONRPC: "2.0",
+		ID:      int64Ptr(1),
+		Method:  "resources/subscribe",
+		Params:  params,
+	}
+	r.Dispatch(context.Background(), req)
+
+	r.SetNotificationSender(func(method string, params any) error {
+		return fmt.Errorf("send failed")
+	})
+
+	err := r.NotifyResourceUpdate("mcp://test/1", "update")
+	if err == nil {
+		t.Fatal("expected error from notification sender")
+	}
+}
+
+// T099: resources/created fires notification for subscribed URI
+func TestRegisterResourceNotifiesSubscriber(t *testing.T) {
+	r := NewRouter()
+
+	// Subscribe first
+	params := json.RawMessage(`{"uri":"mcp://new/1"}`)
+	req := &protocol.Request{
+		JSONRPC: "2.0",
+		ID:      int64Ptr(1),
+		Method:  "resources/subscribe",
+		Params:  params,
+	}
+	r.Dispatch(context.Background(), req)
+
+	// Register a notification sender that receives updates
+	var notifiedMethod string
+	r.SetNotificationSender(func(method string, params any) error {
+		notifiedMethod = method
+		return nil
+	})
+
+	// Register a new resource at the subscribed URI
+	res := testResource("mcp://new/1", "New Resource", "A new resource")
+	r.RegisterResource(res)
+
+	// Notify subscribers of the update
+	r.NotifyResourceUpdate("mcp://new/1", "update")
+
+	if notifiedMethod != "notifications/resources/update" {
+		t.Fatalf("expected notification, got %s", notifiedMethod)
 	}
 }

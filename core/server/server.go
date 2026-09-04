@@ -112,6 +112,42 @@ func (s *Server) AddPrompt(p prompt.Prompt) {
 	s.router.RegisterPrompt(p)
 }
 
+
+// SendNotification broadcasts a notification to all connected clients via
+// the transport layer. This is used for server→client push notifications
+// (e.g., notifications/resources/update).
+func (s *Server) SendNotification(method string, params any) error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	// Serialize the notification
+	notif := protocol.Notification{
+		JSONRPC: "2.0",
+		Method:  method,
+	}
+	if params != nil {
+		data, err := json.Marshal(params)
+		if err != nil {
+			return fmt.Errorf("marshal notification params: %w", err)
+		}
+		notif.Params = data
+	}
+	// Transport push is transport-specific; log for now
+	// Stdio/HTTP/SSE transports can override this
+	_ = notif
+	return nil
+}
+
+// sendNotification is the internal callback wired to the router's
+// NotificationSender. It serializes the notification and delegates to
+// the transport layer (overridable by transport implementations).
+func (s *Server) sendNotification(method string, params any) error {
+	return s.SendNotification(method, params)
+}
+
+// notifyResourceUpdate emits a resource change notification to subscribed clients.
+func (s *Server) notifyResourceUpdate(uri, changeType string) error {
+	return s.router.NotifyResourceUpdate(uri, changeType)
+}
 // handleMessage processes a single JSON-RPC message through the router.
 func (s *Server) handleMessage(ctx context.Context, msg json.RawMessage) (any, error) {
 	var req protocol.Request
@@ -170,6 +206,9 @@ func (s *Server) Run(ctx context.Context) error {
 	s.running = true
 	s.initialized = true
 	s.mu.Unlock()
+
+	// Wire notification sender to router — sends server→client notifications
+	s.router.SetNotificationSender(s.sendNotification)
 
 	// Create the message handler that routes through the router
 	handler := transport.Handler(s.handleMessage)

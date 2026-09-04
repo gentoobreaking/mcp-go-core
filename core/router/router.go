@@ -23,8 +23,8 @@ type Router struct {
 	onResourceCreated CreatedNotifier
 	subscriptions map[string]bool
 	rootsHandler    func() error
+	notifyHandler   protocol.NotificationSender
 }
-
 // SamplingHandler is called when the client sends sampling/createMessage.
 type SamplingHandler func(ctx context.Context, req *protocol.CreateMessageParams) (*protocol.CreateMessageResult, error)
 
@@ -222,6 +222,36 @@ func (r *Router) SetRootsHandler(handler func() error) {
 // IsSubscribed returns whether a resource URI has an active subscription.
 func (r *Router) IsSubscribed(uri string) bool {
 	return r.subscriptions[uri]
+}
+
+// SetNotificationSender registers a callback for emitting server→client
+// notifications (e.g., notifications/resources/update).
+func (r *Router) SetNotificationSender(handler protocol.NotificationSender) {
+	r.notifyHandler = handler
+}
+
+// NotifyResourceUpdate emits a notifications/resources/update notification
+// to all clients subscribed to the given URI.
+// changeType is "update" or "delete".
+func (r *Router) NotifyResourceUpdate(uri, changeType string) error {
+	for sub := range r.subscriptions {
+		if sub == uri {
+			notify := protocol.ResourceUpdateNotification{
+				JSONRPC: "2.0",
+				Method:  "notifications/resources/update",
+				Params: protocol.ResourceUpdateParams{
+					URI:        uri,
+					ChangeType: changeType,
+				},
+			}
+			if r.notifyHandler != nil {
+				if err := r.notifyHandler(notify.Method, notify.Params); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // handleInitialize processes the initialize request handshake.

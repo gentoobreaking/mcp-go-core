@@ -394,3 +394,19 @@ type Subscription struct {
 type RootsListChangedParams struct {
 	// Empty params; notification only
 }
+
+// ResourceUpdateParams is sent from server to client via notifications/resources/update.
+type ResourceUpdateParams struct {
+	URI        string `json:"uri"`
+	ChangeType string `json:"changeType"` // "update" or "delete"
+}
+
+// ResourceUpdateNotification is a server→client notification for resource changes.
+type ResourceUpdateNotification struct {
+	JSONRPC string              `json:"jsonrpc"`
+	Method  string              `json:"method"`
+	Params  ResourceUpdateParams `json:"params"`
+}
+
+// NotificationSender sends a notification to connected clients.
+type NotificationSender func(method string, params any) error
