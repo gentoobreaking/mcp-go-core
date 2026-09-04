@@ -4,7 +4,7 @@ A modular Go framework for building MCP (Model Context Protocol) servers.
 
 **Version:** v0.1.0  
 **Go:** 1.26+  
-**License:** MIT
+**License:** Apache 2.0
 
 ---
 
@@ -683,4 +683,4 @@ go test -bench=. -benchmem ./benchmarks/...
 
 ## License
 
-MIT
+Apache 2.0
