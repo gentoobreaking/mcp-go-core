@@ -532,10 +532,6 @@ kubernetes.WriteManifests(".", spec)
 ---|---|
 | `CodeProtocol` | `"protocol"` |
 | `CodeValidation` | `"validation"` |
-| `CodeAuth` | `"auth"` |
-| `CodeAuthorization` | `"authorization"` |
-| `CodeTransport` | `"transport"` |
-| `CodeTool` | `"tool"` |
 | `CodeInternal` | `"internal"` |
 | `CodeTimeout` | `"timeout"` |
 | `CodeCancellation` | `"cancellation"` |
@@ -597,9 +593,7 @@ go test -bench=. -benchmem ./benchmarks/...
 
 ### Test Counts
 
-- **180 unit tests** across core, modules, and internal packages
-- **51 integration & verification tests** across tests/ directory
-- **Total: 231 tests, 0 failures**
+- **322 total tests, 0 failures**
 
 ### testutil Package
 

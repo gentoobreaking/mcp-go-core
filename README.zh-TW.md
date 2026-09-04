@@ -61,6 +61,8 @@
 | 功能 | 套件 |
 |---|---|
 | 核心中介軟體鏈 | `core/middleware`（Logging、Recovery 透過 `Chain`)|
+| 結構化日誌 | `modules/middleware/logging`（文字/JSON、層級過濾、欄位支援） |
+| Panic 復原 | `modules/middleware/recovery`（RecoveryError、mcperror 整合） |
 | Prometheus 監控 | `modules/middleware/metrics`（基於 `prometheus/client_golang`） |
 | OpenTelemetry 追蹤 | `modules/middleware/tracing`（基於 `otel`） |
 
@@ -69,6 +71,16 @@
 | 功能 | 套件 |
 |---|---|
 | 記憶體型儲存 | `modules/storage/memory` |
+| 檔案系統儲存 | `modules/storage/filesystem`（路徑遍歷保護、context 感知） |
+| Redis 儲存 | `modules/storage/external`（連線池、TTL、SCAN） |
+| PostgreSQL 儲存 | `modules/storage/external`（upsert、前綴掃描、資料表支援） |
+
+### 執行期
+
+| 功能 | 套件 |
+|---|---|
+| 任務管理 | `modules/runtime/task`（Task、Manager、Status、Result、取消支援） |
+| 會話管理 | `modules/runtime/session`（Session、Manager、生命週期整合） |
 
 ### 整合
 
@@ -172,10 +184,17 @@ mcp-go-core/
 │   │   ├── oauth/           # OAuth 2.1 + PKCE
 │   │   └── mtls/            # mTLS（預留）
 │   ├── middleware/
+│   │   ├── logging/         # 結構化日誌（文字/JSON）
+│   │   ├── recovery/        # Panic 復原
 │   │   ├── metrics/         # Prometheus 監控
 │   │   └── tracing/         # OpenTelemetry 追蹤
-│   └── storage/
-│       └── memory/          # 記憶體型儲存
+│   ├── storage/
+│   │   ├── memory/          # 記憶體型儲存
+│   │   ├── filesystem/      # 檔案系統儲存（路徑遍歏保護）
+│   │   └── external/        # Redis + PostgreSQL 儲存
+│   └── runtime/
+│       ├── task/            # 背景任務管理
+│       └── session/         # 會話生命週期管理
 ├── integration-kubernetes/  # Kubernetes 清單生成
 ├── internal/                # 建置時工具（不可被使用者引入）
 │   ├── featuregraph/        # 功能描述、圖、解析、鎖定
@@ -218,8 +237,9 @@ mcp-go-core/
 | `github.com/prometheus/client_golang` | v1.24.1 | 監控中介軟體 |
 | `github.com/spf13/cobra` | v1.10.2 | CLI 框架 |
 | `go.opentelemetry.io/otel` | v1.46.0 | 追蹤中介軟體 |
-| `golang.org/x/oauth2` | v0.36.0 | OAuth PKCE 支援 |
 | `k8s.io/api` | v0.37.0 | Kubernetes 清單型別 |
+| `github.com/redis/go-redis/v9` | v9.22.0 | Redis 儲存後端 |
+| `github.com/lib/pq` | v1.12.3 | PostgreSQL 儲存後端 |
 
 ---
 
@@ -417,7 +437,50 @@ pkce, _ := oauth.GeneratePKCE()  // RFC 7636
 identity, err := auth.Authenticate(ctx, oauth.HTTPRequest{r})
 ```
 
-### Kubernetes 整合
+### 儲存
+
+**外部儲存（Redis/PostgreSQL）：**
+
+```go
+// Redis
+store := external.NewRedis(external.RedisConfig{
+    Addr:     "localhost:6379",
+    PoolSize: 10,
+})
+
+// PostgreSQL
+pg, _ := external.NewPostgreSQL(external.PostgreSQLConfig{
+    DSN:             "postgres://user:pass@localhost/db?sslmode=disable",
+    MaxOpenConns:    25,
+})
+
+// 所有儲存均實作 Store 介面
+var s external.Store = store
+```
+
+### 執行期（任務與會話）
+
+```go
+// 任務管理與取消
+tm := task.NewManager()
+defer tm.Close()
+
+t := tm.Create("my-task", func(ctx context.Context) (task.Result, error) {
+    return task.Result{Data: []byte("done")}, nil
+})
+
+status, _ := tm.Status(t.ID)  // 檢查狀態
+err := tm.Cancel(t.ID)        // 取消仍在執行的任務
+```
+
+```go
+// 會話管理與生命週期
+sm := session.NewManager()
+defer sm.CloseAll()
+
+s, _ := sm.Create("client-session", map[string]any{"client_id": "claude"})
+defer sm.Destroy(s.ID)
+```
 
 ```go
 spec := kubernetes.DeploymentSpec{
@@ -510,7 +573,21 @@ kubernetes.WriteManifests(".", spec)
 | `ShuttingDown` | 正在優雅關閉 |
 | `Shutdown` | 已完全停止 |
 
----
+### modules/runtime/task
+
+| 型別 | 說明 |
+|---|---|
+| `Status` | 任務狀態：`pending`、`running`、`completed`、`failed`、`cancelled` |
+| `Result` | 任務結果：`Data []byte`、`Err error` |
+| `Task` | 背景任務：ID、狀態、建立/完成時間戳 |
+| `Manager` | 執行緒安全管理器：`Create`、`Cancel`、`Status`、`GetResult`、`WaitFor`、`RunningCount` |
+
+### modules/runtime/session
+
+| 型別 | 說明 |
+|---|---|
+| `Session` | 會話：ID、中繼資料、生命週期狀態 |
+| `Manager` | 會話管理器：`Create`、`Get`、`Destroy`、`Count`、`ActiveSessions`、`Close`、`CloseAll` |
 
 ## 測試
 
@@ -530,8 +607,7 @@ go test -bench=. -benchmem ./benchmarks/...
 
 ### 測試數量
 
-- 單元測試、整合測試與驗證測試皆位於對應套件內
-- 詳細測試清單請參考 `tests/` 目錄
+- **322 total tests, 0 failures**
 
 ### testutil 套件
 
