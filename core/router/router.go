@@ -60,6 +60,10 @@ func (r *Router) Dispatch(ctx context.Context, req *protocol.Request) (*protocol
 		return r.dispatchListPrompts(ctx, req)
 	case "prompts/get":
 		return r.dispatchGetPrompt(ctx, req)
+	case "notifications/cancel":
+		// Notification — client requesting cancellation of in-flight request
+		// Parse cancel params: { "requestId": <id> }
+		return &protocol.Response{JSONRPC: "2.0", ID: req.ID, Result: nil}, nil
 	case "initialized":
 		// Notification — no response needed
 		return &protocol.Response{JSONRPC: "2.0", ID: req.ID, Result: nil}, nil
@@ -67,7 +71,6 @@ func (r *Router) Dispatch(ctx context.Context, req *protocol.Request) (*protocol
 		return nil, mcperror.NewError(mcperror.CodeProtocol, "method not found: "+req.Method)
 	}
 }
-
 // handleInitialize processes the initialize request handshake.
 func (r *Router) handleInitialize(ctx context.Context, req *protocol.Request) (*protocol.Response, error) {
 	var initReq protocol.InitializeRequest

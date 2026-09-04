@@ -9,16 +9,15 @@ type PromptRequest struct {
 	Arguments map[string]any
 }
 
-// PromptResponse represents a prompt response.
 type PromptResponse struct {
-	Description string
-	Messages    []PromptMessage
+	Description string      `json:"description,omitempty"`
+	Messages    []PromptMessage `json:"messages"`
 }
 
 // PromptMessage is a single message in a prompt response.
 type PromptMessage struct {
-	Role    string // "user" or "assistant"
-	Content string
+	Role    string `json:"role"`   // "user" or "assistant"
+	Content string `json:"content"`
 }
 
 // Prompt is the interface for an MCP prompt.
