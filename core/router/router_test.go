@@ -756,3 +756,149 @@ func TestRegisterResourceNotifiesSubscriber(t *testing.T) {
 		t.Fatalf("expected notification, got %s", notifiedMethod)
 	}
 }
+
+// T100: prompts/create
+func TestDispatchCreatePrompt(t *testing.T) {
+	r := NewRouter()
+
+	// Register a prompt creator factory
+	r.SetPromptCreator(func(name, desc string, args map[string]any) (prompt.Prompt, error) {
+		return testPrompt(name, desc), nil
+	})
+
+	params := json.RawMessage(`{"name":"dynamicPrompt","description":"a dynamic prompt"}`)
+	req := &protocol.Request{
+		JSONRPC: "2.0",
+		ID:      int64Ptr(1),
+		Method:  "prompts/create",
+		Params:  params,
+	}
+
+	resp, err := r.Dispatch(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Dispatch error: %v", err)
+	}
+
+	if resp.JSONRPC != "2.0" {
+		t.Fatalf("expected jsonrpc 2.0, got %s", resp.JSONRPC)
+	}
+
+	// Verify the prompt was actually registered
+	prompts := r.ListPrompts()
+	if len(prompts) != 1 {
+		t.Fatalf("expected 1 prompt registered, got %d", len(prompts))
+	}
+}
+
+// T100: prompts/create without creator returns success (no-op)
+func TestDispatchCreatePromptNoCreator(t *testing.T) {
+	r := NewRouter()
+
+	params := json.RawMessage(`{"name":"testPrompt"}`)
+	req := &protocol.Request{
+		JSONRPC: "2.0",
+		ID:      int64Ptr(1),
+		Method:  "prompts/create",
+		Params:  params,
+	}
+
+	resp, err := r.Dispatch(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Dispatch error: %v", err)
+	}
+
+	// No creator registered — should still return success (no-op)
+	if resp.JSONRPC != "2.0" {
+		t.Fatalf("expected jsonrpc 2.0, got %s", resp.JSONRPC)
+	}
+}
+
+// T100: notifications/prompts/list_changed
+func TestDispatchPromptsListChanged(t *testing.T) {
+	r := NewRouter()
+
+	called := false
+	r.SetPromptListChangedHandler(func() error {
+		called = true
+		return nil
+	})
+
+	req := &protocol.Request{
+		JSONRPC: "2.0",
+		ID:      int64Ptr(1),
+		Method:  "notifications/prompts/list_changed",
+	}
+
+	resp, err := r.Dispatch(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Dispatch error: %v", err)
+	}
+
+	if !called {
+		t.Fatal("expected prompt list changed handler to be called")
+	}
+
+	if resp.JSONRPC != "2.0" {
+		t.Fatalf("expected jsonrpc 2.0, got %s", resp.JSONRPC)
+	}
+}
+
+// T100: notifications/resources/list_changed
+func TestDispatchResourcesListChanged(t *testing.T) {
+	r := NewRouter()
+
+	called := false
+	r.SetResourceListChangedHandler(func() error {
+		called = true
+		return nil
+	})
+
+	req := &protocol.Request{
+		JSONRPC: "2.0",
+		ID:      int64Ptr(1),
+		Method:  "notifications/resources/list_changed",
+	}
+
+	resp, err := r.Dispatch(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Dispatch error: %v", err)
+	}
+
+	if !called {
+		t.Fatal("expected resource list changed handler to be called")
+	}
+
+	if resp.JSONRPC != "2.0" {
+		t.Fatalf("expected jsonrpc 2.0, got %s", resp.JSONRPC)
+	}
+}
+
+// T100: notifications/tools/list_changed
+func TestDispatchToolsListChanged(t *testing.T) {
+	r := NewRouter()
+
+	called := false
+	r.SetToolsListChangedHandler(func() error {
+		called = true
+		return nil
+	})
+
+	req := &protocol.Request{
+		JSONRPC: "2.0",
+		ID:      int64Ptr(1),
+		Method:  "notifications/tools/list_changed",
+	}
+
+	resp, err := r.Dispatch(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Dispatch error: %v", err)
+	}
+
+	if !called {
+		t.Fatal("expected tools list changed handler to be called")
+	}
+
+	if resp.JSONRPC != "2.0" {
+		t.Fatalf("expected jsonrpc 2.0, got %s", resp.JSONRPC)
+	}
+}

@@ -24,13 +24,21 @@ type Router struct {
 	subscriptions map[string]bool
 	rootsHandler    func() error
 	notifyHandler   protocol.NotificationSender
+	promptCreator   PromptCreator
+	promptListChanged    func() error
+	resourceListChanged  func() error
+	toolsListChanged     func() error
 }
+
 // SamplingHandler is called when the client sends sampling/createMessage.
 type SamplingHandler func(ctx context.Context, req *protocol.CreateMessageParams) (*protocol.CreateMessageResult, error)
 
 // CreatedNotifier sends a resources/created notification when a resource is registered.
 type CreatedNotifier func(uri, name string)
 
+// PromptCreator is a factory function invoked by prompts/create to
+// dynamically construct a Prompt from client-provided params.
+type PromptCreator func(name, description string, args map[string]any) (prompt.Prompt, error)
 // NewRouter creates a new Router.
 func NewRouter() *Router {
 	return &Router{
@@ -81,6 +89,15 @@ func (r *Router) RegisterPrompt(p prompt.Prompt) {
 	r.prompts[p.Name()] = p
 }
 
+// ListPrompts returns a copy of registered prompts.
+func (r *Router) ListPrompts() []prompt.Prompt {
+	result := make([]prompt.Prompt, 0, len(r.prompts))
+	for _, p := range r.prompts {
+		result = append(result, p)
+	}
+	return result
+}
+
 // Dispatch routes a request to the appropriate handler.
 func (r *Router) Dispatch(ctx context.Context, req *protocol.Request) (*protocol.Response, error) {
 	switch req.Method {
@@ -116,6 +133,14 @@ func (r *Router) Dispatch(ctx context.Context, req *protocol.Request) (*protocol
 		return r.dispatchRootsListChanged(ctx, req)
 	case "resources/subscribe":
 		return r.dispatchSubscribe(ctx, req)
+	case "prompts/create":
+		return r.dispatchCreatePrompt(ctx, req)
+	case "notifications/prompts/list_changed":
+		return r.dispatchPromptsListChanged(ctx, req)
+	case "notifications/resources/list_changed":
+		return r.dispatchResourcesListChanged(ctx, req)
+	case "notifications/tools/list_changed":
+		return r.dispatchToolsListChanged(ctx, req)
 	default:
 		return nil, mcperror.NewError(mcperror.CodeProtocol, "method not found: "+req.Method)
 	}
@@ -254,6 +279,77 @@ func (r *Router) NotifyResourceUpdate(uri, changeType string) error {
 	return nil
 }
 
+// dispatchCreatePrompt handles prompts/create — registers a new prompt.
+func (r *Router) dispatchCreatePrompt(ctx context.Context, req *protocol.Request) (*protocol.Response, error) {
+	var params protocol.PromptCreateParams
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return nil, mcperror.NewInvalidParamsError("invalid prompts/create params: " + err.Error())
+	}
+
+	if params.Name == "" {
+		return nil, mcperror.NewInvalidParamsError("name is required")
+	}
+
+	// Use registered prompt factory if available, otherwise no-op handler
+	if r.promptCreator != nil {
+		p, err := r.promptCreator(params.Name, params.Description, params.Arguments)
+		if err != nil {
+			return nil, mcperror.NewError(mcperror.CodeInternal, err.Error())
+		}
+		r.RegisterPrompt(p)
+	}
+
+	return &protocol.Response{
+		JSONRPC: "2.0",
+		ID:      req.ID,
+		Result:  map[string]any{"success": true},
+	}, nil
+}
+
+// dispatchPromptsListChanged handles notifications/prompts/list_changed.
+func (r *Router) dispatchPromptsListChanged(ctx context.Context, req *protocol.Request) (*protocol.Response, error) {
+	// Trigger prompt refresh hook if registered
+	if r.promptListChanged != nil {
+		_ = r.promptListChanged()
+	}
+	return &protocol.Response{JSONRPC: "2.0", ID: req.ID, Result: nil}, nil
+}
+
+// dispatchResourcesListChanged handles notifications/resources/list_changed.
+func (r *Router) dispatchResourcesListChanged(ctx context.Context, req *protocol.Request) (*protocol.Response, error) {
+	if r.resourceListChanged != nil {
+		_ = r.resourceListChanged()
+	}
+	return &protocol.Response{JSONRPC: "2.0", ID: req.ID, Result: nil}, nil
+}
+
+// dispatchToolsListChanged handles notifications/tools/list_changed.
+func (r *Router) dispatchToolsListChanged(ctx context.Context, req *protocol.Request) (*protocol.Response, error) {
+	if r.toolsListChanged != nil {
+		_ = r.toolsListChanged()
+	}
+	return &protocol.Response{JSONRPC: "2.0", ID: req.ID, Result: nil}, nil
+}
+
+// SetPromptListChangedHandler registers a callback for notifications/prompts/list_changed.
+func (r *Router) SetPromptListChangedHandler(h func() error) {
+	r.promptListChanged = h
+}
+
+// SetResourceListChangedHandler registers a callback for notifications/resources/list_changed.
+func (r *Router) SetResourceListChangedHandler(h func() error) {
+	r.resourceListChanged = h
+}
+
+// SetToolsListChangedHandler registers a callback for notifications/tools/list_changed.
+func (r *Router) SetToolsListChangedHandler(h func() error) {
+	r.toolsListChanged = h
+}
+
+// SetPromptCreator registers a factory for prompts/create dynamic registration.
+func (r *Router) SetPromptCreator(fn PromptCreator) {
+	r.promptCreator = fn
+}
 // handleInitialize processes the initialize request handshake.
 func (r *Router) handleInitialize(ctx context.Context, req *protocol.Request) (*protocol.Response, error) {
 	var initReq protocol.InitializeRequest

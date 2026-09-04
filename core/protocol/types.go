@@ -395,6 +395,20 @@ type RootsListChangedParams struct {
 	// Empty params; notification only
 }
 
+// PromptCreateParams is sent from client to server via prompts/create.
+type PromptCreateParams struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description,omitempty"`
+	Arguments   map[string]any `json:"arguments,omitempty"`
+}
+
+// ToolListChangedNotification is a server→client notification for tool list changes.
+type ToolListChangedNotification struct {
+	JSONRPC string `json:"jsonrpc"`
+	Method  string `json:"method"`
+	Params  any    `json:"params,omitempty"`
+}
+
 // ResourceUpdateParams is sent from server to client via notifications/resources/update.
 type ResourceUpdateParams struct {
 	URI        string `json:"uri"`
