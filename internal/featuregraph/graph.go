@@ -27,7 +27,6 @@ func (g *Graph) AddFeature(f FeatureDescriptor) error {
 	if _, ok := g.features[f.Name]; ok {
 		return NewGraphError(ErrDuplicateFeature, "feature already exists: "+f.Name)
 	}
-	f.State = f.State
 	if f.State == "" {
 		f.State = StateAuto
 	}
