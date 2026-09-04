@@ -2,6 +2,13 @@ package oauth
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -32,6 +39,226 @@ func TestAuthenticateMissingHeader(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for missing header")
 	}
+	if !strings.Contains(err.Error(), "missing") {
+		t.Fatalf("expected missing header error, got: %v", err)
+	}
+}
+
+func TestAuthenticateInvalidFormat(t *testing.T) {
+	a := NewAuthenticator("https://auth.example.com", "client123", []string{})
+	_, err := a.Authenticate(context.Background(), &mockRequest{
+		headers: map[string]string{"Authorization": "Basic sometoken"},
+	})
+	if err == nil {
+		t.Fatal("expected error for invalid format")
+	}
+}
+
+func TestAuthenticateEmptyBearer(t *testing.T) {
+	a := NewAuthenticator("https://auth.example.com", "client123", []string{})
+	_, err := a.Authenticate(context.Background(), &mockRequest{
+		headers: map[string]string{"Authorization": "Bearer "},
+	})
+	if err == nil {
+		t.Fatal("expected error for empty bearer token")
+	}
+}
+
+func TestAuthenticateJWTValid(t *testing.T) {
+	secret := "test-secret"
+	now := time.Now().Unix()
+	claims := jwtClaims{
+		Subject:  "user123",
+		Issuer:   "test-iss",
+		Expiry:   now + 3600,
+		IssuedAt: now,
+		Scope:    "read write",
+	}
+
+	token := makeTestJWT(claims, secret)
+
+	a := NewAuthenticator("https://auth.example.com", "client123", []string{"read", "write"})
+	a = a.WithJWT("test-iss", secret)
+
+	identity, err := a.Authenticate(context.Background(), &mockRequest{
+		headers: map[string]string{"Authorization": "Bearer " + token},
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if identity.Principal != "user123" {
+		t.Fatalf("expected principal user123, got: %s", identity.Principal)
+	}
+	if len(identity.Scopes) != 2 {
+		t.Fatalf("expected 2 scopes, got: %d", len(identity.Scopes))
+	}
+}
+
+func TestAuthenticateJWTExpired(t *testing.T) {
+	secret := "test-secret"
+	now := time.Now().Unix()
+	claims := jwtClaims{
+		Subject:  "user123",
+		Issuer:   "test-iss",
+		Expiry:   now - 3600, // expired
+		IssuedAt: now - 7200,
+		Scope:    "read",
+	}
+
+	token := makeTestJWT(claims, secret)
+
+	a := NewAuthenticator("https://auth.example.com", "client123", []string{"read"})
+	a = a.WithJWT("test-iss", secret)
+
+	_, err := a.Authenticate(context.Background(), &mockRequest{
+		headers: map[string]string{"Authorization": "Bearer " + token},
+	})
+	if err == nil {
+		t.Fatal("expected error for expired token")
+	}
+	if !strings.Contains(err.Error(), "expired") {
+		t.Fatalf("expected expired error, got: %v", err)
+	}
+}
+
+func TestAuthenticateJWTInvalidSignature(t *testing.T) {
+	secret := "test-secret"
+	now := time.Now().Unix()
+	claims := jwtClaims{
+		Subject:  "user123",
+		Issuer:   "test-iss",
+		Expiry:   now + 3600,
+		IssuedAt: now,
+		Scope:    "read",
+	}
+
+	token := makeTestJWT(claims, secret)
+	// Tamper with signature
+	token = token[:len(token)-5] + "XXXXX"
+
+	a := NewAuthenticator("https://auth.example.com", "client123", []string{"read"})
+	a = a.WithJWT("test-iss", secret)
+
+	_, err := a.Authenticate(context.Background(), &mockRequest{
+		headers: map[string]string{"Authorization": "Bearer " + token},
+	})
+	if err == nil {
+		t.Fatal("expected error for invalid signature")
+	}
+}
+
+func TestAuthenticateJWTIssuerMismatch(t *testing.T) {
+	secret := "test-secret"
+	now := time.Now().Unix()
+	claims := jwtClaims{
+		Subject:  "user123",
+		Issuer:   "wrong-iss",
+		Expiry:   now + 3600,
+		IssuedAt: now,
+		Scope:    "read",
+	}
+
+	token := makeTestJWT(claims, secret)
+
+	a := NewAuthenticator("https://auth.example.com", "client123", []string{"read"})
+	a = a.WithJWT("test-iss", secret)
+
+	_, err := a.Authenticate(context.Background(), &mockRequest{
+		headers: map[string]string{"Authorization": "Bearer " + token},
+	})
+	if err == nil {
+		t.Fatal("expected error for issuer mismatch")
+	}
+	if !strings.Contains(err.Error(), "issuer") {
+		t.Fatalf("expected issuer mismatch error, got: %v", err)
+	}
+}
+
+func TestAuthenticateJWTScopeNotAllowed(t *testing.T) {
+	secret := "test-secret"
+	now := time.Now().Unix()
+	claims := jwtClaims{
+		Subject:  "user123",
+		Issuer:   "test-iss",
+		Expiry:   now + 3600,
+		IssuedAt: now,
+		Scope:    "admin",
+	}
+
+	token := makeTestJWT(claims, secret)
+
+	a := NewAuthenticator("https://auth.example.com", "client123", []string{"read"})
+	a = a.WithJWT("test-iss", secret)
+
+	_, err := a.Authenticate(context.Background(), &mockRequest{
+		headers: map[string]string{"Authorization": "Bearer " + token},
+	})
+	if err == nil {
+		t.Fatal("expected error for disallowed scope")
+	}
+}
+
+func TestAuthenticateIntrospectionFallback(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"active":   true,
+			"sub":      "introspected_user",
+			"scope":    "read write",
+			"username": "intro_user",
+		})
+	}))
+	defer server.Close()
+
+	a := NewAuthenticator("https://auth.example.com", "client123", []string{})
+	a.tokenURL = server.URL + "/token"
+
+	identity, err := a.Authenticate(context.Background(), &mockRequest{
+		headers: map[string]string{"Authorization": "Bearer opaque-token"},
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if identity.Principal != "introspected_user" {
+		t.Fatalf("expected introspected_user, got: %s", identity.Principal)
+	}
+}
+
+func TestAuthenticateIntrospectionInactiveToken(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"active": false,
+		})
+	}))
+	defer server.Close()
+
+	a := NewAuthenticator("https://auth.example.com", "client123", []string{})
+	a.tokenURL = server.URL + "/token"
+
+	_, err := a.Authenticate(context.Background(), &mockRequest{
+		headers: map[string]string{"Authorization": "Bearer inactive-token"},
+	})
+	if err == nil {
+		t.Fatal("expected error for inactive token")
+	}
+}
+
+func TestAuthenticateIntrospectionError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	a := NewAuthenticator("https://auth.example.com", "client123", []string{})
+	a.tokenURL = server.URL + "/token"
+
+	_, err := a.Authenticate(context.Background(), &mockRequest{
+		headers: map[string]string{"Authorization": "Bearer token"},
+	})
+	if err == nil {
+		t.Fatal("expected error for introspection failure")
+	}
 }
 
 func TestTokenIsValid(t *testing.T) {
@@ -43,6 +270,13 @@ func TestTokenIsValid(t *testing.T) {
 	}
 	if TokenIsValid(&oauth2.Token{}) {
 		t.Fatal("empty token should be invalid")
+	}
+	expired := &oauth2.Token{
+		AccessToken: "test",
+		Expiry:      time.Now().Add(-1 * time.Hour),
+	}
+	if TokenIsValid(expired) {
+		t.Fatal("expired token should be invalid")
 	}
 }
 
@@ -105,41 +339,57 @@ func TestPKCEAuthorizationURL(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	url, err := pkce.AuthorizationURL("https://auth.example.com/authorize", "client123", "http://localhost/cb", []string{"read", "write"})
+	u, err := pkce.AuthorizationURL("https://auth.example.com/authorize", "client123", "http://localhost/cb", []string{"read", "write"})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if url == "" {
+	if u == "" {
 		t.Fatal("expected non-empty URL")
 	}
 
-	if !contains(url, pkce.Challenge) {
+	if !strings.Contains(u, pkce.Challenge) {
 		t.Fatal("URL should contain challenge")
 	}
 
-	if !contains(url, "S256") {
+	if !strings.Contains(u, "S256") {
 		t.Fatal("URL should contain method S256")
 	}
 }
 
 func TestIntrospectToken(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"active": true,
+			"sub":    "test_user",
+			"scope":  "read write",
+		})
+	}))
+	defer server.Close()
+
 	identity, err := IntrospectToken(context.Background(), &oauth2.Token{
 		AccessToken: "test-token",
 		Expiry:      time.Now().Add(1 * time.Hour),
-	}, "https://auth.example.com/token")
+	}, server.URL+"/token")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if identity.Principal == "" {
 		t.Fatal("expected non-empty principal")
 	}
+	if identity.Principal != "test_user" {
+		t.Fatalf("expected test_user, got: %s", identity.Principal)
+	}
 }
 
 func TestIntrospectToken_Invalid(t *testing.T) {
-	_, err := IntrospectToken(context.Background(), nil, "https://auth.example.com/token")
+	_, err := IntrospectToken(context.Background(), nil, "")
 	if err == nil {
 		t.Fatal("expected error for nil token")
+	}
+	if !strings.Contains(err.Error(), "introspection URL is required") {
+		t.Fatalf("expected URL required error, got: %v", err)
 	}
 
 	_, err = IntrospectToken(context.Background(), &oauth2.Token{}, "https://auth.example.com/token")
@@ -148,11 +398,54 @@ func TestIntrospectToken_Invalid(t *testing.T) {
 	}
 }
 
-func contains(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
+func TestRevokeToken(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("expected POST, got %s", r.Method)
 		}
+		if r.Header.Get("Authorization") != "Bearer test-token" {
+			t.Errorf("expected Bearer token in Authorization header")
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	err := RevokeToken(context.Background(), &oauth2.Token{
+		AccessToken: "test-token",
+	}, server.URL+"/revoke")
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
 	}
-	return false
+}
+
+func TestRevokeTokenError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	err := RevokeToken(context.Background(), &oauth2.Token{
+		AccessToken: "test-token",
+	}, server.URL+"/revoke")
+	if err == nil {
+		t.Fatal("expected error for server failure")
+	}
+}
+
+// makeTestJWT creates a JWT token signed with HMAC-SHA256 for testing.
+func makeTestJWT(claims jwtClaims, secret string) string {
+	header := `{"alg":"HS256","typ":"JWT"}`
+	headerB64 := base64.RawURLEncoding.EncodeToString([]byte(header))
+
+	payload, _ := json.Marshal(claims)
+	payloadB64 := base64.RawURLEncoding.EncodeToString(payload)
+
+	signingInput := headerB64 + "." + payloadB64
+
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(signingInput))
+	signature := mac.Sum(nil)
+	sigB64 := base64.RawURLEncoding.EncodeToString(signature)
+
+	return signingInput + "." + sigB64
 }
