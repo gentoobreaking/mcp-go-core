@@ -15,14 +15,16 @@ import (
 
 // Server represents an MCP server with lifecycle management.
 type Server struct {
-	mu         sync.RWMutex
-	name       string
-	router     *router.Router
-	shutdownCh chan struct{}
-	wg         sync.WaitGroup
-	timeout    time.Duration
+	mu          sync.RWMutex
+	name        string
+	router      *router.Router
+	transport   Transport
+	mw          []Middleware
+	shutdownCh  chan struct{}
+	wg          sync.WaitGroup
+	timeout     time.Duration
 	initialized bool
-	running    bool
+	running     bool
 }
 
 // Option configures a Server.
