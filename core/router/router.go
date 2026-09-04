@@ -30,6 +30,10 @@ type Router struct {
 	toolsListChanged     func() error
 	progressHandler      func(params protocol.ProgressNotificationParams)
 	messageHandler       func(level, logger string, data any)
+	elicitationHandler   func(params protocol.ElicitationCreateParams) error
+	elicitationRegistry  map[string]protocol.ElicitationResult
+	taskRegistry         map[string]protocol.TaskResult
+	roots                []protocol.Root
 }
 
 // SamplingHandler is called when the client sends sampling/createMessage.
@@ -49,6 +53,8 @@ func NewRouter() *Router {
 		prompts:   make(map[string]prompt.Prompt),
 		logLevel:  protocol.LogLevelInfo,
 		subscriptions: make(map[string]bool),
+		elicitationRegistry: make(map[string]protocol.ElicitationResult),
+		taskRegistry: make(map[string]protocol.TaskResult),
 	}
 }
 
@@ -151,6 +157,22 @@ func (r *Router) Dispatch(ctx context.Context, req *protocol.Request) (*protocol
 		return r.dispatchResourcesListChanged(ctx, req)
 	case "notifications/tools/list_changed":
 		return r.dispatchToolsListChanged(ctx, req)
+	case "elicitation/create":
+		return r.dispatchElicitationCreate(ctx, req)
+	case "notifications/elicitation/complete":
+		return r.dispatchElicitationComplete(ctx, req)
+	case "tasks/get":
+		return r.dispatchTasksGet(ctx, req)
+	case "tasks/list":
+		return r.dispatchTasksList(ctx, req)
+	case "tasks/cancel":
+		return r.dispatchTasksCancel(ctx, req)
+	case "server/discover":
+		return r.dispatchServerDiscover(ctx, req)
+	case "roots/list":
+		return r.dispatchRootsList(ctx, req)
+	case "subscriptions/listen":
+		return r.dispatchSubscriptionListen(ctx, req)
 	default:
 		return nil, mcperror.NewError(mcperror.CodeProtocol, "method not found: "+req.Method)
 	}
@@ -618,4 +640,172 @@ func (r *Router) dispatchCreateMessage(ctx context.Context, req *protocol.Reques
 		ID:      req.ID,
 		Result:  result,
 	}, nil
+}
+
+// dispatchElicitationCreate handles elicitation/create — requests client input.
+func (r *Router) dispatchElicitationCreate(ctx context.Context, req *protocol.Request) (*protocol.Response, error) {
+	var params protocol.ElicitationCreateParams
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return nil, mcperror.NewInvalidParamsError("invalid elicitation params: " + err.Error())
+	}
+
+	if params.Message == "" {
+		return nil, mcperror.NewInvalidParamsError("message is required")
+	}
+
+	elicitationID := "el_" + params.Message
+	r.elicitationRegistry[elicitationID] = protocol.ElicitationResult{Action: "pending"}
+
+	if r.elicitationHandler != nil {
+		_ = r.elicitationHandler(params)
+	}
+
+	return &protocol.Response{
+		JSONRPC: "2.0",
+		ID:      req.ID,
+		Result: map[string]any{
+			"elicitationId": elicitationID,
+			"message":       params.Message,
+		},
+	}, nil
+}
+
+// dispatchElicitationComplete handles notifications/elicitation/complete.
+func (r *Router) dispatchElicitationComplete(ctx context.Context, req *protocol.Request) (*protocol.Response, error) {
+	var params protocol.ElicitationCompleteParams
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return nil, mcperror.NewInvalidParamsError("invalid elicitation complete params: " + err.Error())
+	}
+
+	if _, ok := r.elicitationRegistry[params.Id]; ok {
+		r.elicitationRegistry[params.Id] = params.Result
+	}
+
+	return &protocol.Response{JSONRPC: "2.0", ID: req.ID, Result: nil}, nil
+}
+
+// dispatchTasksGet handles tasks/get — returns a task by ID.
+func (r *Router) dispatchTasksGet(ctx context.Context, req *protocol.Request) (*protocol.Response, error) {
+	var params struct {
+		ID string `json:"id,omitempty"`
+	}
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return nil, mcperror.NewInvalidParamsError("invalid tasks/get params: " + err.Error())
+	}
+
+	task, ok := r.taskRegistry[params.ID]
+	if !ok {
+		return nil, mcperror.NewError(mcperror.CodeProtocol, "task not found: "+params.ID)
+	}
+
+	return &protocol.Response{
+		JSONRPC: "2.0",
+		ID:      req.ID,
+		Result:  task,
+	}, nil
+}
+
+// dispatchTasksList handles tasks/list — returns all tasks.
+func (r *Router) dispatchTasksList(ctx context.Context, req *protocol.Request) (*protocol.Response, error) {
+	tasks := make([]protocol.TaskResult, 0, len(r.taskRegistry))
+	for _, t := range r.taskRegistry {
+		tasks = append(tasks, t)
+	}
+
+	return &protocol.Response{
+		JSONRPC: "2.0",
+		ID:      req.ID,
+		Result:  protocol.TaskListResult{Tasks: tasks},
+	}, nil
+}
+
+// dispatchTasksCancel handles tasks/cancel — cancels a task by ID.
+func (r *Router) dispatchTasksCancel(ctx context.Context, req *protocol.Request) (*protocol.Response, error) {
+	var params protocol.TaskCancelParams
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return nil, mcperror.NewInvalidParamsError("invalid tasks/cancel params: " + err.Error())
+	}
+
+	if task, ok := r.taskRegistry[params.ID]; ok {
+		task.Status = protocol.TaskStatusCanceled
+		r.taskRegistry[params.ID] = task
+	}
+
+	return &protocol.Response{
+		JSONRPC: "2.0",
+		ID:      req.ID,
+		Result:  map[string]any{"success": true},
+	}, nil
+}
+
+// dispatchServerDiscover handles server/discover — returns server capabilities.
+func (r *Router) dispatchServerDiscover(ctx context.Context, req *protocol.Request) (*protocol.Response, error) {
+	result := map[string]any{
+		"protocolVersion": "2024-11-05",
+		"capabilities": map[string]any{
+			"tools":     true,
+			"resources": true,
+			"prompts":   true,
+			"logging":   true,
+			"complete":  true,
+		},
+		"serverInfo": map[string]any{
+			"name":    "mcp-go-core",
+			"version": "0.1.0",
+		},
+	}
+
+	return &protocol.Response{
+		JSONRPC: "2.0",
+		ID:      req.ID,
+		Result:  result,
+	}, nil
+}
+
+// dispatchRootsList handles roots/list — returns stored roots from client.
+func (r *Router) dispatchRootsList(ctx context.Context, req *protocol.Request) (*protocol.Response, error) {
+	return &protocol.Response{
+		JSONRPC: "2.0",
+		ID:      req.ID,
+		Result:  protocol.ListRootsResult{Roots: r.roots},
+	}, nil
+}
+
+// dispatchSubscriptionListen handles subscriptions/listen — stores subscription URI.
+func (r *Router) dispatchSubscriptionListen(ctx context.Context, req *protocol.Request) (*protocol.Response, error) {
+	var params protocol.SubscriptionListenParams
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return nil, mcperror.NewInvalidParamsError("invalid subscriptions/listen params: " + err.Error())
+	}
+
+	return &protocol.Response{
+		JSONRPC: "2.0",
+		ID:      req.ID,
+		Result:  map[string]any{"success": true},
+	}, nil
+}
+
+// SetElicitationHandler registers a callback for elicitation/create.
+func (r *Router) SetElicitationHandler(h func(params protocol.ElicitationCreateParams) error) {
+	r.elicitationHandler = h
+}
+
+// ResolveElicitation returns the result of an elicitation by ID.
+func (r *Router) ResolveElicitation(id string) (protocol.ElicitationResult, bool) {
+	result, ok := r.elicitationRegistry[id]
+	return result, ok
+}
+
+// RegisterTask adds a task to the registry.
+func (r *Router) RegisterTask(id string, status protocol.TaskStatus, result any) {
+	r.taskRegistry[id] = protocol.TaskResult{
+		ID:     id,
+		Status: status,
+		Result: result,
+	}
+}
+
+// SetRoots registers roots provided by the client via roots/list.
+func (r *Router) SetRoots(roots []protocol.Root) {
+	r.roots = roots
 }

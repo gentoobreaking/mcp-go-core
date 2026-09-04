@@ -463,3 +463,68 @@ type MessageNotificationParams struct {
 	Logger string `json:"logger,omitempty"`
 	Data   any    `json:"data"`
 }
+
+// ElicitationCreateParams is sent from server to client via elicitation/create.
+type ElicitationCreateParams struct {
+	Message         string         `json:"message"`
+	RequestedSchema map[string]any `json:"requestedSchema,omitempty"`
+}
+
+// ElicitationResult is returned by the client for elicitation/create.
+type ElicitationResult struct {
+	Action  string         `json:"action"`
+	Content map[string]any `json:"content,omitempty"`
+}
+
+// ElicitationCompleteParams is sent from client to server via
+// notifications/elicitation/complete.
+type ElicitationCompleteParams struct {
+	Id     string            `json:"id"`
+	Result ElicitationResult `json:"result"`
+}
+
+// TaskStatus represents the status of a task.
+type TaskStatus string
+
+const (
+	TaskStatusPending   TaskStatus = "pending"
+	TaskStatusRunning   TaskStatus = "running"
+	TaskStatusCompleted TaskStatus = "completed"
+	TaskStatusFailed    TaskStatus = "failed"
+	TaskStatusCanceled  TaskStatus = "canceled"
+)
+
+// TaskResult is returned by tasks/get.
+type TaskResult struct {
+	ID     string    `json:"id"`
+	Status TaskStatus `json:"status"`
+	Result any       `json:"result,omitempty"`
+	Error  string    `json:"error,omitempty"`
+}
+
+// TaskListResult is returned by tasks/list.
+type TaskListResult struct {
+	Tasks []TaskResult `json:"tasks,omitempty"`
+}
+
+// TaskCancelParams is sent from client to server via tasks/cancel.
+type TaskCancelParams struct {
+	ID string `json:"id"`
+}
+
+// ListRootsResult is sent from client to server via roots/list.
+type ListRootsResult struct {
+	Roots []Root `json:"roots,omitempty"`
+}
+
+// Root represents a root directory or file that the server can operate on.
+type Root struct {
+	URI         string `json:"uri"`
+	Name        string `json:"name,omitempty"`
+	Description string `json:"description,omitempty"`
+}
+
+// SubscriptionListenParams is sent from client to server via subscriptions/listen.
+type SubscriptionListenParams struct {
+	URI string `json:"uri,omitempty"`
+}

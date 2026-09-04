@@ -1043,3 +1043,252 @@ func TestDispatchMessage(t *testing.T) {
 		t.Fatalf("expected data 'hello', got %v", receivedData)
 	}
 }
+
+// T102: elicitation/create
+func TestDispatchElicitationCreate(t *testing.T) {
+	r := NewRouter()
+
+	params := json.RawMessage(`{"message":"Do you accept?","requestedSchema":{"type":"object"}}`)
+	req := &protocol.Request{
+		JSONRPC: "2.0",
+		ID:      int64Ptr(1),
+		Method:  "elicitation/create",
+		Params:  params,
+	}
+
+	resp, err := r.Dispatch(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Dispatch error: %v", err)
+	}
+
+	result, ok := resp.Result.(map[string]any)
+	if !ok {
+		t.Fatalf("expected map result, got %T", resp.Result)
+	}
+	if result["elicitationId"] == nil {
+		t.Fatal("expected elicitationId in result")
+	}
+	if result["message"] != "Do you accept?" {
+		t.Fatalf("expected message, got %v", result["message"])
+	}
+}
+
+// T102: notifications/elicitation/complete
+func TestDispatchElicitationComplete(t *testing.T) {
+	r := NewRouter()
+
+	// First create an elicitation
+	createReq := &protocol.Request{
+		JSONRPC: "2.0",
+		ID:      int64Ptr(1),
+		Method:  "elicitation/create",
+		Params:  json.RawMessage(`{"message":"accept?"}`),
+	}
+	createResp, _ := r.Dispatch(context.Background(), createReq)
+	createResult := createResp.Result.(map[string]any)
+	elID := createResult["elicitationId"].(string)
+
+	// Now complete it
+	completeReq := &protocol.Request{
+		JSONRPC: "2.0",
+		ID:      int64Ptr(2),
+		Method:  "notifications/elicitation/complete",
+		Params:  json.RawMessage(`{"id":"` + elID + `","result":{"action":"accept","content":{"answer":"yes"}}}`),
+	}
+
+	resp, err := r.Dispatch(context.Background(), completeReq)
+	if err != nil {
+		t.Fatalf("Dispatch error: %v", err)
+	}
+	if resp.JSONRPC != "2.0" {
+		t.Fatalf("expected jsonrpc 2.0, got %s", resp.JSONRPC)
+	}
+
+	// Verify the elicitation was resolved
+	resolved, ok := r.ResolveElicitation(elID)
+	if !ok {
+		t.Fatal("expected elicitation to be resolvable")
+	}
+	if resolved.Action != "accept" {
+		t.Fatalf("expected action accept, got %s", resolved.Action)
+	}
+}
+
+// T102: tasks/get
+func TestDispatchTasksGet(t *testing.T) {
+	r := NewRouter()
+	r.RegisterTask("task-1", protocol.TaskStatusCompleted, "result data")
+
+	params := json.RawMessage(`{"id":"task-1"}`)
+	req := &protocol.Request{
+		JSONRPC: "2.0",
+		ID:      int64Ptr(1),
+		Method:  "tasks/get",
+		Params:  params,
+	}
+
+	resp, err := r.Dispatch(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Dispatch error: %v", err)
+	}
+
+	task, ok := resp.Result.(protocol.TaskResult)
+	if !ok {
+		t.Fatalf("expected TaskResult, got %T", resp.Result)
+	}
+	if task.Status != protocol.TaskStatusCompleted {
+		t.Fatalf("expected completed status, got %s", task.Status)
+	}
+}
+
+// T102: tasks/list
+func TestDispatchTasksList(t *testing.T) {
+	r := NewRouter()
+	r.RegisterTask("task-1", protocol.TaskStatusRunning, nil)
+	r.RegisterTask("task-2", protocol.TaskStatusCompleted, "done")
+
+	req := &protocol.Request{
+		JSONRPC: "2.0",
+		ID:      int64Ptr(1),
+		Method:  "tasks/list",
+	}
+
+	resp, err := r.Dispatch(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Dispatch error: %v", err)
+	}
+
+	result, ok := resp.Result.(protocol.TaskListResult)
+	if !ok {
+		t.Fatalf("expected TaskListResult, got %T", resp.Result)
+	}
+	if len(result.Tasks) != 2 {
+		t.Fatalf("expected 2 tasks, got %d", len(result.Tasks))
+	}
+}
+
+// T102: tasks/cancel
+func TestDispatchTasksCancel(t *testing.T) {
+	r := NewRouter()
+	r.RegisterTask("task-1", protocol.TaskStatusRunning, nil)
+
+	params := json.RawMessage(`{"id":"task-1"}`)
+	req := &protocol.Request{
+		JSONRPC: "2.0",
+		ID:      int64Ptr(1),
+		Method:  "tasks/cancel",
+		Params:  params,
+	}
+
+	resp, err := r.Dispatch(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Dispatch error: %v", err)
+	}
+
+	result, ok := resp.Result.(map[string]any)
+	if !ok {
+		t.Fatalf("expected map result, got %T", resp.Result)
+	}
+	if result["success"] != true {
+		t.Fatal("expected success true")
+	}
+
+	// Verify task was canceled
+	task, ok := r.taskRegistry["task-1"]
+	if !ok {
+		t.Fatal("expected task to exist")
+	}
+	if task.Status != protocol.TaskStatusCanceled {
+		t.Fatalf("expected canceled status, got %s", task.Status)
+	}
+}
+
+// T102: server/discover
+func TestDispatchServerDiscover(t *testing.T) {
+	r := NewRouter()
+
+	req := &protocol.Request{
+		JSONRPC: "2.0",
+		ID:      int64Ptr(1),
+		Method:  "server/discover",
+	}
+
+	resp, err := r.Dispatch(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Dispatch error: %v", err)
+	}
+
+	result, ok := resp.Result.(map[string]any)
+	if !ok {
+		t.Fatalf("expected map result, got %T", resp.Result)
+	}
+	if result["protocolVersion"] != "2024-11-05" {
+		t.Fatalf("expected protocolVersion, got %v", result["protocolVersion"])
+	}
+	caps, ok := result["capabilities"].(map[string]any)
+	if !ok {
+		t.Fatal("expected capabilities map")
+	}
+	if !caps["tools"].(bool) {
+		t.Fatal("expected tools capability true")
+	}
+}
+
+// T102: roots/list
+func TestDispatchRootsList(t *testing.T) {
+	r := NewRouter()
+
+	// Register roots (simulating client roots/list)
+	r.SetRoots([]protocol.Root{
+		{URI: "file:///home/user/docs", Name: "docs"},
+		{URI: "file:///home/user/code", Name: "code"},
+	})
+
+	req := &protocol.Request{
+		JSONRPC: "2.0",
+		ID:      int64Ptr(1),
+		Method:  "roots/list",
+	}
+
+	resp, err := r.Dispatch(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Dispatch error: %v", err)
+	}
+
+	result, ok := resp.Result.(protocol.ListRootsResult)
+	if !ok {
+		t.Fatalf("expected ListRootsResult, got %T", resp.Result)
+	}
+	if len(result.Roots) != 2 {
+		t.Fatalf("expected 2 roots, got %d", len(result.Roots))
+	}
+	if result.Roots[0].URI != "file:///home/user/docs" {
+		t.Fatalf("expected docs root URI, got %s", result.Roots[0].URI)
+	}
+}
+
+// T102: subscriptions/listen
+func TestDispatchSubscriptionListen(t *testing.T) {
+	r := NewRouter()
+
+	params := json.RawMessage(`{"uri":"mcp://watch"}`)
+	req := &protocol.Request{
+		JSONRPC: "2.0",
+		ID:      int64Ptr(1),
+		Method:  "subscriptions/listen",
+		Params:  params,
+	}
+
+	resp, err := r.Dispatch(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Dispatch error: %v", err)
+	}
+
+	result, ok := resp.Result.(map[string]any)
+	if !ok {
+		t.Fatalf("expected map result, got %T", resp.Result)
+	}
+	if result["success"] != true {
+		t.Fatal("expected success true")
+	}
+}
