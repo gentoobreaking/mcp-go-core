@@ -607,7 +607,7 @@ go test -bench=. -benchmem ./benchmarks/...
 
 ### 測試數量
 
-- **322 total tests, 0 failures**
+- **337 total tests, 0 failures**
 
 ### testutil 套件
 

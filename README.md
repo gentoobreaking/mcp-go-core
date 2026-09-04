@@ -593,9 +593,7 @@ go test -bench=. -benchmem ./benchmarks/...
 
 ### Test Counts
 
-- **322 total tests, 0 failures**
-
-### testutil Package
+- **337 total tests, 0 failures**
 
 | Type | Description |
 |---|---|
