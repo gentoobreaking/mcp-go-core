@@ -53,13 +53,3 @@ type VerificationReport struct {
 	Modules  []string
 	Errors   []string
 }
-
-// TestBenchmarkRegression tests that benchmarks pass.
-func TestBenchmarkRegression(t *testing.T) {
-	// Benchmark regression gates ensure performance doesn't degrade
-}
-
-// TestReproducibleBuild tests that builds are reproducible.
-func TestReproducibleBuild(t *testing.T) {
-	// Reproducible builds ensure same input → same binary hash
-}
